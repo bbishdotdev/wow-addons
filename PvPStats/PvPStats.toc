@@ -1,0 +1,11 @@
+## Interface: 20504
+## Title: PvPStats
+## Notes: Battleground PvP analytics tracker for TBC Classic
+## Author: btbis
+## Version: 0.1.0
+## SavedVariablesPerCharacter: PvPStatsDB
+
+Utils.lua
+Core.lua
+BattlegroundTracker.lua
+UI.lua
