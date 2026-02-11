@@ -44,15 +44,32 @@ local function HitModeValueLabel(target)
 end
 
 local function FormatStatusLabel(status)
-    if status == "completed" then return "Done" end
+    if status == "completed" then return "Closed" end
     if status == "closed" then return "Closed" end
-    return "Active"
+    return "Open"
 end
 
 local function BountyModeValueLabel(mode)
     if mode == "infinite" then return "Indefinitely" end
     if mode == "first_kill" then return "One-Time" end
     return "None"
+end
+
+local function ColorizeBountyState(text, token)
+    if token == "open" then
+        return "|cFFD93333" .. text .. "|r"
+    end
+    if token == "unpaid" then
+        return "|cFFF2A63A" .. text .. "|r"
+    end
+    if token == "closed" then
+        return "|cFF33CC66" .. text .. "|r"
+    end
+    return text
+end
+
+local function GoldPipe()
+    return "|cFFFFD100|r"
 end
 
 local function LatestClaimSummary(target)
@@ -90,11 +107,12 @@ local function BountySummaryLabel(target)
     if status == "claimed" then
         local killer, payState = LatestClaimSummary(target)
         if killer then
-            return modeLabel .. " | Claimed by " .. killer .. " | " .. payState
+            local payToken = (payState == "Unpaid") and "unpaid" or "closed"
+            return modeLabel .. " " .. GoldPipe() .. " Claimed by " .. killer .. " " .. GoldPipe() .. " " .. ColorizeBountyState(payState, payToken)
         end
-        return modeLabel .. " | Claimed"
+        return modeLabel .. " " .. GoldPipe() .. " " .. ColorizeBountyState("Unpaid", "unpaid")
     end
-    return modeLabel .. " | Open"
+    return modeLabel .. " " .. GoldPipe() .. " " .. ColorizeBountyState("Open", "open")
 end
 
 local function BuildClaimsText(target)
@@ -572,7 +590,6 @@ function UI:RefreshDetails()
     self.detailBountyText:SetText(Utils.GoldStringFromCopper(target.bountyAmount or 0))
     local hitModeLabel = HitModeValueLabel(target)
     self.detailModesValue:SetText(hitModeLabel)
-    local bountyStatus = target.bountyStatus or "open"
     self.detailBountyStatusValue:SetText(BountySummaryLabel(target))
     self.detailBountyStatusValue:SetTextColor(0.9, 0.9, 0.9, 1)
 
@@ -1259,7 +1276,7 @@ function UI:Init()
 
     self.bountyEdit = CreateFrame("EditBox", nil, detailDrawer, "InputBoxTemplate")
     self.bountyEdit:SetSize(110, 24)
-    self.bountyEdit:SetPoint("TOPLEFT", self.bountyLabel, "BOTTOMLEFT", 0, -8)
+    self.bountyEdit:SetPoint("TOPLEFT", self.bountyLabel, "BOTTOMLEFT", 24, -8)
     self.bountyEdit:SetAutoFocus(false)
     self.bountyEdit:SetNumeric(true)
     self.bountyEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
@@ -1281,7 +1298,9 @@ function UI:Init()
 
     self.bountyAmountIcon = UIComponents.CreateIcon(detailDrawer, 16)
     self.bountyAmountIcon:SetTexture(Theme.ICON.bounty)
-    self.bountyAmountIcon:SetPoint("LEFT", self.bountyEdit, "RIGHT", 8, 0)
+    self.bountyAmountIcon:SetPoint("LEFT", self.bountyLabel, "LEFT", 2, -20)
+    self.bountyEdit:ClearAllPoints()
+    self.bountyEdit:SetPoint("LEFT", self.bountyAmountIcon, "RIGHT", 12, 0)
 
     self.bountyAmountReadOnlyText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     self.bountyAmountReadOnlyText:SetPoint("LEFT", self.bountyEdit, "LEFT", 6, 0)
@@ -1289,7 +1308,7 @@ function UI:Init()
     self.bountyAmountReadOnlyText:Hide()
 
     self.bountyModeDropdown = CreateFrame("Frame", "GUnitBountyModeDropdown", detailDrawer, "UIDropDownMenuTemplate")
-    self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -16, -10)
+    self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -20, -10)
     UIDropDownMenu_SetWidth(self.bountyModeDropdown, 110)
     UIDropDownMenu_Initialize(self.bountyModeDropdown, function(dropdown, level)
         local options = {
@@ -1318,7 +1337,9 @@ function UI:Init()
 
     self.bountyModeIcon = UIComponents.CreateIcon(detailDrawer, 16)
     self.bountyModeIcon:SetTexture("Interface\\Icons\\INV_Misc_PocketWatch_01")
-    self.bountyModeIcon:SetPoint("LEFT", self.bountyModeDropdown, "RIGHT", -8, 2)
+    self.bountyModeIcon:SetPoint("LEFT", self.bountyAmountIcon, "LEFT", 0, -34)
+    self.bountyModeDropdown:ClearAllPoints()
+    self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -20, -10)
 
     self.bountyModeReadOnlyText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     self.bountyModeReadOnlyText:SetPoint("LEFT", self.bountyModeDropdown, "LEFT", 16, 0)

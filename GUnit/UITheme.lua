@@ -23,9 +23,9 @@ Theme.COLOR = {
     rowHover = { 1, 1, 1, 0.08 },
     textMuted = { 0.6, 0.6, 0.6, 1 },
     textAccent = { 1, 0.82, 0.0, 1 },
-    statusActive = { 0.15, 0.8, 0.2, 1 },
-    statusDone = { 0.85, 0.55, 0.1, 1 },
-    statusClosed = { 0.7, 0.2, 0.2, 1 },
+    statusActive = { 0.85, 0.2, 0.2, 1 }, -- Open
+    statusDone = { 0.2, 0.8, 0.2, 1 }, -- Closed (completed)
+    statusClosed = { 0.2, 0.8, 0.2, 1 }, -- Closed
 }
 
 Theme.ICON = {
