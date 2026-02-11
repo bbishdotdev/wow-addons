@@ -27,6 +27,7 @@ local function EnsureTarget(name, actorName, ts)
         GUnit.db.targets[name] = {
             name = name,
             submitter = actorName,
+            guildName = Utils.GuildName(),
             reason = "",
             bountyAmount = 0,
             hitMode = HIT_MODE_ONE_TIME,
@@ -78,6 +79,29 @@ function HitList:SortedNames()
     end
     table.sort(names)
     return names
+end
+
+function HitList:SortedNamesForCurrentGuild()
+    local guildName = Utils.GuildName()
+    local names = {}
+    for name, target in pairs(GUnit.db.targets) do
+        if target.guildName == guildName then
+            table.insert(names, name)
+        end
+    end
+    table.sort(names)
+    return names
+end
+
+function HitList:GetAllForCurrentGuild()
+    local guildName = Utils.GuildName()
+    local out = {}
+    for name, target in pairs(GUnit.db.targets) do
+        if target.guildName == guildName then
+            out[name] = target
+        end
+    end
+    return out
 end
 
 function HitList:CanMutate(target, actorName)
@@ -192,6 +216,12 @@ function HitList:UpsertFromComm(payload)
     local submitter = Utils.NormalizeName(payload.submitter) or payload.submitter or "Unknown"
 
     local target = EnsureTarget(normalized, submitter, ts)
+
+    -- Guild channel is authoritative — always update guildName
+    if payload.guildName and payload.guildName ~= "" then
+        target.guildName = payload.guildName
+    end
+
     if target.updatedAt and target.updatedAt > ts then
         return target
     end
@@ -242,11 +272,15 @@ end
 
 function HitList:ApplyKill(targetName, killerName, zone, ts)
     local target = self:Get(targetName)
-    if not target then return nil end
+    if not target then
+        GUnit:Print("[DEBUG] ApplyKill: target not found for '" .. tostring(targetName) .. "'")
+        return nil
+    end
 
     local now = ts or Utils.Now()
     local killer = Utils.NormalizeName(killerName) or killerName or "Unknown"
 
+    local prevCount = target.killCount or 0
     target.kills = target.kills or {}
     table.insert(target.kills, {
         killer = killer,
@@ -259,7 +293,8 @@ function HitList:ApplyKill(targetName, killerName, zone, ts)
             zone = zone or Utils.ZoneName(),
         },
     })
-    target.killCount = (target.killCount or 0) + 1
+    target.killCount = prevCount + 1
+    GUnit:Print("[DEBUG] ApplyKill: " .. targetName .. " killCount " .. prevCount .. " -> " .. target.killCount)
 
     if target.hitMode == HIT_MODE_ONE_TIME and target.hitStatus == HIT_STATUS_ACTIVE then
         target.hitStatus = HIT_STATUS_COMPLETED
@@ -284,5 +319,62 @@ function HitList:ApplyKill(targetName, killerName, zone, ts)
 
     target.updatedAt = now
     return CloneEntry(target)
+end
+
+local FIELD_SEP = ";"
+local EXPORT_FIELDS = {
+    "name", "submitter", "guildName", "reason", "bountyAmount",
+    "hitMode", "hitStatus", "bountyMode", "bountyStatus",
+    "validated", "classToken", "race", "faction",
+    "createdAt", "updatedAt", "killCount",
+}
+
+function HitList:ExportCurrentGuild()
+    local targets = self:GetAllForCurrentGuild()
+    local lines = {}
+    for _, target in pairs(targets) do
+        local fields = {}
+        for _, key in ipairs(EXPORT_FIELDS) do
+            local val = target[key]
+            if key == "validated" then
+                val = val and "1" or "0"
+            end
+            table.insert(fields, tostring(val or ""))
+        end
+        table.insert(lines, table.concat(fields, FIELD_SEP))
+    end
+    table.sort(lines)
+    return table.concat(lines, "\n")
+end
+
+local function SplitFields(line)
+    local fields = {}
+    local padded = line .. FIELD_SEP
+    for field in padded:gmatch("([^" .. FIELD_SEP .. "]*)" .. FIELD_SEP) do
+        table.insert(fields, field)
+    end
+    return fields
+end
+
+function HitList:ImportFromString(data)
+    if not data or data == "" then return 0 end
+    local count = 0
+    for line in data:gmatch("[^\n]+") do
+        local trimmed = strtrim(line)
+        if trimmed ~= "" then
+            local fields = SplitFields(trimmed)
+            if #fields >= #EXPORT_FIELDS then
+                local payload = {}
+                for i, key in ipairs(EXPORT_FIELDS) do
+                    payload[key] = fields[i]
+                end
+                if payload.name and payload.name ~= "" then
+                    self:UpsertFromComm(payload)
+                    count = count + 1
+                end
+            end
+        end
+    end
+    return count
 end
 

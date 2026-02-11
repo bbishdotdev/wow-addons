@@ -92,14 +92,25 @@ local function OnCombatLogEvent()
 
     local targetName = Utils.NormalizeName(destName)
     local target = HitList:Get(targetName)
-    if not target then return end
-    if not HitList:ShouldAnnounceSighting(target) then return end
+    if not target then
+        GUnit:Print("[DEBUG] PARTY_KILL: " .. tostring(destName) .. " not on hit list")
+        return
+    end
+    if not HitList:ShouldAnnounceSighting(target) then
+        GUnit:Print("[DEBUG] PARTY_KILL: " .. targetName .. " skipped (status=" .. tostring(target.hitStatus) .. ")")
+        return
+    end
+
+    GUnit:Print("[DEBUG] PARTY_KILL: processing kill on " .. targetName .. " (pre-killCount=" .. tostring(target.killCount) .. ")")
 
     local zone = Utils.ZoneName()
     local now = Utils.Now()
     HitList:ApplyKill(targetName, playerName, zone, now)
     Comm:BroadcastKill(targetName, playerName, zone, now)
-    Comm:BroadcastUpsert(HitList:Get(targetName))
+
+    local updatedTarget = HitList:Get(targetName)
+    GUnit:Print("[DEBUG] PARTY_KILL: post-kill " .. targetName .. " killCount=" .. tostring(updatedTarget and updatedTarget.killCount or "NIL"))
+    Comm:BroadcastUpsert(updatedTarget)
     GUnit:NotifyDataChanged()
 
     SendGuildMessage(playerName .. " has killed " .. target.name .. ". Hit was placed by " .. target.submitter .. ".")

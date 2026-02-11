@@ -133,14 +133,7 @@ local function OpenUI()
     end
 end
 
-SLASH_GUNIT1 = "/gunit"
-SLASH_GUNIT2 = "/g-unit"
-SlashCmdList["GUNIT"] = function()
-    OpenUI()
-end
-
-SLASH_GHIT1 = "/ghit"
-SlashCmdList["GHIT"] = function(msg)
+local function HandleGhitCommand(msg)
     local input = strtrim(msg or "")
     if input == "" then
         AddFromTargetUnit()
@@ -219,3 +212,37 @@ SlashCmdList["GHIT"] = function(msg)
 
     AddByName(input)
 end
+
+SLASH_GUNIT1 = "/gunit"
+SLASH_GUNIT2 = "/g-unit"
+SlashCmdList["GUNIT"] = function(msg)
+    local input = strtrim(msg or "")
+    if input == "" then
+        OpenUI()
+        return
+    end
+    if input == "export" then
+        if GUnit.UI and GUnit.UI.ShowExportFrame then
+            GUnit.UI:ShowExportFrame()
+        end
+        return
+    end
+    if input == "import" then
+        if GUnit.UI and GUnit.UI.ShowImportFrame then
+            GUnit.UI:ShowImportFrame()
+        end
+        return
+    end
+    if input == "sync" then
+        if GUnit.Sync and GUnit.Sync.RequestSync then
+            GUnit.Sync:RequestSync()
+            GUnit:Print("Sync requested.")
+        end
+        return
+    end
+    -- Forward all other commands to the hit list handler
+    HandleGhitCommand(input)
+end
+
+SLASH_GHIT1 = "/ghit"
+SlashCmdList["GHIT"] = HandleGhitCommand

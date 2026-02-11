@@ -9,6 +9,7 @@ Utils.lua
 Core.lua
 HitList.lua
 Comm.lua
+Sync.lua
 Tracking.lua
 UI.lua
 Commands.lua

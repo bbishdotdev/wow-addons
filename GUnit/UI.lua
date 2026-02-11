@@ -35,7 +35,7 @@ local function BuildClaimsText(target)
 end
 
 function UI:RefreshList()
-    self.names = HitList:SortedNames()
+    self.names = HitList:SortedNamesForCurrentGuild()
     local startIndex = self.pageOffset + 1
 
     for rowIndex = 1, ROWS_PER_PAGE do
@@ -313,6 +313,22 @@ function UI:Init()
         SaveTargetAndBroadcast(updated)
     end)
 
+    local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    exportBtn:SetSize(90, 22)
+    exportBtn:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -110, 16)
+    exportBtn:SetText("Export")
+    exportBtn:SetScript("OnClick", function()
+        UI:ShowExportFrame()
+    end)
+
+    local importBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    importBtn:SetSize(90, 22)
+    importBtn:SetPoint("LEFT", exportBtn, "RIGHT", 8, 0)
+    importBtn:SetText("Import")
+    importBtn:SetScript("OnClick", function()
+        UI:ShowImportFrame()
+    end)
+
     self:Refresh()
 end
 
@@ -324,4 +340,93 @@ function UI:Toggle()
         self:Refresh()
         self.frame:Show()
     end
+end
+
+local function CreateTextFrame(title, bodyText, editable)
+    local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    frame:SetSize(500, 400)
+    frame:SetPoint("CENTER")
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", frame.StartMoving)
+    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
+    frame:SetFrameStrata("DIALOG")
+    frame:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 16,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    frame:SetBackdropColor(0, 0, 0, 0.95)
+
+    local titleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    titleLabel:SetPoint("TOP", frame, "TOP", 0, -12)
+    titleLabel:SetText(title)
+
+    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
+
+    local bottomPadding = editable and 50 or 16
+    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -40)
+    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, bottomPadding)
+
+    local editBox = CreateFrame("EditBox", nil, scroll)
+    editBox:SetMultiLine(true)
+    editBox:SetFontObject("ChatFontNormal")
+    editBox:SetWidth(scroll:GetWidth() or 440)
+    editBox:SetAutoFocus(false)
+    editBox:SetText(bodyText or "")
+    editBox:SetCursorPosition(0)
+    scroll:SetScrollChild(editBox)
+
+    if not editable then
+        editBox:SetScript("OnTextChanged", function(self)
+            self:SetText(bodyText or "")
+            self:HighlightText()
+        end)
+    end
+
+    editBox:SetScript("OnEditFocusGained", function(self)
+        self:HighlightText()
+    end)
+
+    frame.editBox = editBox
+    return frame
+end
+
+function UI:ShowExportFrame()
+    local data = HitList:ExportCurrentGuild()
+    if not data or data == "" then
+        GUnit:Print("No hits to export for current guild.")
+        return
+    end
+    if self.exportFrame then
+        self.exportFrame:Hide()
+        self.exportFrame = nil
+    end
+    self.exportFrame = CreateTextFrame("G-Unit Export (Ctrl+A, Ctrl+C)", data, false)
+    self.exportFrame.editBox:HighlightText()
+end
+
+function UI:ShowImportFrame()
+    if self.importFrame then
+        self.importFrame:Hide()
+        self.importFrame = nil
+    end
+    self.importFrame = CreateTextFrame("G-Unit Import (Paste & Click Import)", "", true)
+
+    local importBtn = CreateFrame("Button", nil, self.importFrame, "UIPanelButtonTemplate")
+    importBtn:SetSize(100, 24)
+    importBtn:SetPoint("BOTTOMRIGHT", self.importFrame, "BOTTOMRIGHT", -12, 20)
+    importBtn:SetText("Import")
+    importBtn:SetScript("OnClick", function()
+        local text = UI.importFrame.editBox:GetText()
+        local count = HitList:ImportFromString(text)
+        GUnit:Print("Imported " .. count .. " hit(s).")
+        GUnit:NotifyDataChanged()
+        UI.importFrame:Hide()
+        UI.importFrame = nil
+    end)
 end

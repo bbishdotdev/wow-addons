@@ -17,7 +17,7 @@ local function RegisterPrefix()
     end
 end
 
-local function SendAddon(channel, payload)
+function Comm:Send(channel, payload)
     if C_ChatInfo and C_ChatInfo.SendAddonMessage then
         C_ChatInfo.SendAddonMessage(PREFIX, payload, channel)
     elseif SendAddonMessage then
@@ -25,7 +25,7 @@ local function SendAddon(channel, payload)
     end
 end
 
-local function EncodeMap(map)
+function Comm:EncodeMap(map)
     local parts = {}
     for key, value in pairs(map) do
         table.insert(parts, Utils.Escape(key) .. KV_SEP .. Utils.Escape(value))
@@ -33,7 +33,7 @@ local function EncodeMap(map)
     return table.concat(parts, PAIR_SEP)
 end
 
-local function DecodeMap(payload)
+function Comm:DecodeMap(payload)
     local out = {}
     for part in string.gmatch(payload or "", "([^" .. PAIR_SEP .. "]+)") do
         local key, value = string.match(part, "^(.-)" .. KV_SEP .. "(.*)$")
@@ -44,17 +44,18 @@ local function DecodeMap(payload)
     return out
 end
 
-local function ActionPayload(action, map)
+function Comm:ActionPayload(action, map)
     map = map or {}
     map.action = action
-    return EncodeMap(map)
+    return self:EncodeMap(map)
 end
 
 function Comm:BroadcastUpsert(target)
     if not target or not Utils.InGuild() then return end
-    local payload = ActionPayload("UPSERT", {
+    local payload = self:ActionPayload("UPSERT", {
         name = target.name,
         submitter = target.submitter,
+        guildName = target.guildName or Utils.GuildName() or "",
         reason = target.reason or "",
         bountyAmount = target.bountyAmount or 0,
         hitMode = target.hitMode or "one_time",
@@ -69,27 +70,27 @@ function Comm:BroadcastUpsert(target)
         updatedAt = target.updatedAt or Utils.Now(),
         killCount = target.killCount or 0,
     })
-    SendAddon("GUILD", payload)
+    self:Send("GUILD", payload)
 end
 
 function Comm:BroadcastDelete(targetName)
     if not Utils.InGuild() then return end
-    local payload = ActionPayload("DELETE", {
+    local payload = self:ActionPayload("DELETE", {
         name = targetName,
         updatedAt = Utils.Now(),
     })
-    SendAddon("GUILD", payload)
+    self:Send("GUILD", payload)
 end
 
 function Comm:BroadcastKill(targetName, killerName, zoneName, ts)
     if not Utils.InGuild() then return end
-    local payload = ActionPayload("KILL", {
+    local payload = self:ActionPayload("KILL", {
         name = targetName,
         killer = killerName,
         zone = zoneName or Utils.ZoneName(),
         ts = ts or Utils.Now(),
     })
-    SendAddon("GUILD", payload)
+    self:Send("GUILD", payload)
 end
 
 local function HandleUpsert(data)
@@ -115,7 +116,7 @@ end
 local function OnAddonMessage(_, prefix, payload, _, sender)
     if prefix ~= PREFIX then return end
     if Utils.NormalizeName(sender) == Utils.NormalizeName(Utils.PlayerName()) then return end
-    local data = DecodeMap(payload)
+    local data = Comm:DecodeMap(payload)
     local action = data.action
     if action == "UPSERT" then
         HandleUpsert(data)
@@ -123,6 +124,8 @@ local function OnAddonMessage(_, prefix, payload, _, sender)
         HandleDelete(data)
     elseif action == "KILL" then
         HandleKill(data)
+    elseif GUnit.Sync and GUnit.Sync.HandleMessage then
+        GUnit.Sync:HandleMessage(action, data, sender)
     end
 end
 

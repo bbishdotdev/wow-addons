@@ -23,6 +23,13 @@ function Utils.InGuild()
     return IsInGuild and IsInGuild() or (GetGuildInfo("player") ~= nil)
 end
 
+function Utils.GuildName()
+    if GetGuildInfo then
+        return GetGuildInfo("player")
+    end
+    return nil
+end
+
 function Utils.CopperFromGoldString(value)
     local amount = tonumber(value)
     if not amount then return nil end

@@ -58,6 +58,16 @@ local function OnPlayerLogin()
     CopyDefaults(GUnitDB, DB_DEFAULTS)
     GUnit.db = GUnitDB
 
+    -- Migration: backfill guildName on entries created before guild-scoping
+    local guildName = GUnit.Utils.GuildName()
+    if guildName and GUnit.db.targets then
+        for _, target in pairs(GUnit.db.targets) do
+            if not target.guildName then
+                target.guildName = guildName
+            end
+        end
+    end
+
     if GUnit.Comm and GUnit.Comm.Init then
         GUnit.Comm:Init()
     end
@@ -66,6 +76,13 @@ local function OnPlayerLogin()
     end
     if GUnit.UI and GUnit.UI.Init then
         GUnit.UI:Init()
+    end
+
+    -- Auto-sync guild data after a short delay (guild roster needs time to load)
+    if GUnit.Sync and GUnit.Utils.InGuild() then
+        C_Timer.After(3, function()
+            GUnit.Sync:RequestSync()
+        end)
     end
 
     GUnit:Print("v" .. GUnit.VERSION .. " loaded. Use /ghit and /g-unit.")
