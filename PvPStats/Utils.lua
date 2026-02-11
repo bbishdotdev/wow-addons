@@ -77,25 +77,6 @@ function Utils.ColorResult(result)
     return result or "N/A"
 end
 
--- Class color lookup (TBC classes)
-Utils.CLASS_COLORS = {
-    WARRIOR     = "ffc79c6e",
-    PALADIN     = "fff58cba",
-    HUNTER      = "ffabd473",
-    ROGUE       = "fffff569",
-    PRIEST      = "ffffffff",
-    SHAMAN      = "ff0070de",
-    MAGE        = "ff69ccf0",
-    WARLOCK     = "ff9482c9",
-    DRUID       = "ffff7d0a",
-}
-
--- Colorize a player name by class token
-function Utils.ColorByClass(name, classToken)
-    local color = Utils.CLASS_COLORS[classToken] or "ffffffff"
-    return "|c" .. color .. name .. "|r"
-end
-
 -- Short BG name for display
 Utils.BG_SHORT_NAMES = {
     ["Warsong Gulch"]  = "WSG",

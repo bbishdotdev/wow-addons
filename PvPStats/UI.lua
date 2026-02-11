@@ -1,439 +1,263 @@
--- PvPStats: Basic modal UI with filters and match list
+-- PvPStats: Main frame shell, tab management, view navigation
 local _, PvPStats = ...
+local C = PvPStats.C
 
-local Utils = PvPStats.Utils
 local UI = {}
 PvPStats.UI = UI
 
 -- ============================================================
--- Constants
+-- State
 -- ============================================================
-local FRAME_WIDTH = 720
-local FRAME_HEIGHT = 500
-local ROW_HEIGHT = 20
-local HEADER_HEIGHT = 20
-local VISIBLE_ROWS = 18
-local FILTER_BTN_WIDTH = 70
+local mainFrame, contentArea, comingSoonText
+local currentView = "list"
+local forceClose = false
+local tabs = {}
+local selectedTab = 1
 
--- Layout offsets from main frame top
-local FILTER_BAR_Y = -30
-local FILTER_BAR_HEIGHT = 26
-local COLUMN_HEADER_Y = FILTER_BAR_Y - FILTER_BAR_HEIGHT - 4  -- -60
-local LIST_Y = COLUMN_HEADER_Y - HEADER_HEIGHT - 2             -- -82
+local TAB_NAMES = { "Battlegrounds", "Arenas", "Duels", "World" }
+local ENABLED_TABS = { [1] = true }
+local TAB_WIDTHS = { 120, 80, 70, 70 }
 
--- Active filters
-local activeFilters = {
-    queueType = nil,  -- nil = all, "solo", "group"
-    location  = nil,  -- nil = all, "Warsong Gulch", etc.
-}
+-- Tab textures (same as Questie/AceGUI — confirmed working on TBC Anniversary)
+local TEX_ACTIVE = "Interface\\OptionsFrame\\UI-OptionsFrame-ActiveTab"
+local TEX_INACTIVE = "Interface\\OptionsFrame\\UI-OptionsFrame-InActiveTab"
+local TEX_HIGHLIGHT = "Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight"
+
+-- 3-piece TexCoords: left cap, middle stretch, right cap
+local TC_LEFT  = { 0, 0.15625, 0, 1.0 }
+local TC_MID   = { 0.15625, 0.84375, 0, 1.0 }
+local TC_RIGHT = { 0.84375, 1.0, 0, 1.0 }
+local CAP_WIDTH = 20
 
 -- ============================================================
--- Main frame creation
+-- Initialization (lazy, called on first toggle)
 -- ============================================================
-local mainFrame = nil
-local rowFrames = {}
+function UI:Init()
+    if mainFrame then return end
+    self:CreateMainFrame()
+    self:CreateTabs()
 
-local function CreateMainFrame()
-    local f = CreateFrame("Frame", "PvPStatsMainFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(FRAME_WIDTH, FRAME_HEIGHT)
-    f:SetPoint("CENTER")
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("DIALOG")
-
-    -- Title (safety check for TBC template differences)
-    if f.TitleText then
-        f.TitleText:SetText("PvPStats — Battleground Tracker")
+    if PvPStats.BGListView then
+        PvPStats.BGListView:Create(contentArea)
     end
+    if PvPStats.BGDetailView then
+        PvPStats.BGDetailView:Create(contentArea)
+    end
+end
 
-    -- Close with Escape
+-- ============================================================
+-- Main frame
+-- ============================================================
+function UI:CreateMainFrame()
+    mainFrame = CreateFrame("Frame", "PvPStatsMainFrame", UIParent, "BasicFrameTemplateWithInset")
+    mainFrame:SetSize(C.FRAME_WIDTH, C.FRAME_HEIGHT)
+    mainFrame:SetPoint("CENTER")
+    mainFrame:SetMovable(true)
+    mainFrame:EnableMouse(true)
+    mainFrame:RegisterForDrag("LeftButton")
+    mainFrame:SetScript("OnDragStart", mainFrame.StartMoving)
+    mainFrame:SetScript("OnDragStop", mainFrame.StopMovingOrSizing)
+    mainFrame:SetClampedToScreen(true)
+    mainFrame.TitleText:SetText("PvPStats")
+
     tinsert(UISpecialFrames, "PvPStatsMainFrame")
 
-    f:Hide()
-    return f
+    -- Intercept Hide so ESC navigates back from detail view
+    local origHide = mainFrame.Hide
+    mainFrame.Hide = function(self)
+        if not forceClose and currentView == "detail" then
+            UI:ShowView("list")
+            return
+        end
+        forceClose = false
+        origHide(self)
+    end
+
+    -- X button always force-closes
+    if mainFrame.CloseButton then
+        mainFrame.CloseButton:SetScript("OnClick", function()
+            forceClose = true
+            mainFrame:Hide()
+        end)
+    end
+
+    -- Content area starts below tab row inside the inset
+    contentArea = CreateFrame("Frame", nil, mainFrame)
+    contentArea:SetPoint("TOPLEFT", mainFrame.InsetBg, "TOPLEFT", 4, -28)
+    contentArea:SetPoint("BOTTOMRIGHT", mainFrame.InsetBg, "BOTTOMRIGHT", -4, 4)
+
+    -- Placeholder for disabled tabs
+    comingSoonText = contentArea:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    comingSoonText:SetPoint("CENTER")
+    comingSoonText:SetText("|cff888888Coming Soon|r")
+    comingSoonText:Hide()
+
+    mainFrame:Hide()
 end
 
 -- ============================================================
--- Filter bar — anchored to main frame, below title
+-- Tab bar: 3-piece manual tabs (Questie/AceGUI approach)
 -- ============================================================
-local function CreateFilterBar(parent)
-    local bar = CreateFrame("Frame", nil, parent)
-    bar:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, FILTER_BAR_Y)
-    bar:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -12, FILTER_BAR_Y)
-    bar:SetHeight(FILTER_BAR_HEIGHT)
+local function CreateTabTexPiece(tab, name, texture, width, anchor, relFrame, relPoint, xOff, yOff, tc)
+    local tex = tab:CreateTexture(name, "BORDER")
+    tex:SetTexture(texture)
+    tex:SetSize(width, 24)
+    tex:SetPoint(anchor, relFrame, relPoint, xOff or 0, yOff or 0)
+    tex:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+    return tex
+end
 
-    local filters = {
-        { label = "Overall",  queueType = nil,     location = nil },
-        { label = "Solo",     queueType = "solo",  location = nil },
-        { label = "Group",    queueType = "group", location = nil },
-        { label = "WSG",      queueType = nil,     location = "Warsong Gulch" },
-        { label = "AB",       queueType = nil,     location = "Arathi Basin" },
-        { label = "AV",       queueType = nil,     location = "Alterac Valley" },
-    }
+function UI:CreateTabs()
+    for i, name in ipairs(TAB_NAMES) do
+        local tabWidth = TAB_WIDTHS[i]
+        local midWidth = tabWidth - (CAP_WIDTH * 2)
+        local tabName = "PvPStatsTab" .. i
 
-    local prevBtn = nil
-    for _, cfg in ipairs(filters) do
-        local btn = CreateFrame("Button", nil, bar, "UIPanelButtonTemplate")
-        btn:SetSize(FILTER_BTN_WIDTH, 22)
-        btn:SetText(cfg.label)
+        local tab = CreateFrame("Button", tabName, mainFrame)
+        tab:SetSize(tabWidth, 24)
+        tab:SetID(i)
+        tab:SetFrameLevel(mainFrame:GetFrameLevel() + 4)
 
-        if prevBtn then
-            btn:SetPoint("LEFT", prevBtn, "RIGHT", 4, 0)
+        if i == 1 then
+            tab:SetPoint("TOPLEFT", mainFrame.InsetBg, "TOPLEFT", 4, 0)
         else
-            btn:SetPoint("LEFT", bar, "LEFT", 0, 0)
+            tab:SetPoint("LEFT", tabs[i - 1], "RIGHT", -10, 0)
         end
 
-        btn:SetScript("OnClick", function()
-            activeFilters.queueType = cfg.queueType
-            activeFilters.location  = cfg.location
-            UI:RefreshMatchList()
+        -- Active (selected) tab art — 3 pieces anchored at BOTTOMLEFT with -3 overhang
+        tab.activeL = CreateTabTexPiece(tab, tabName.."AL", TEX_ACTIVE, CAP_WIDTH,
+            "BOTTOMLEFT", tab, "BOTTOMLEFT", 0, -3, TC_LEFT)
+        tab.activeM = CreateTabTexPiece(tab, tabName.."AM", TEX_ACTIVE, midWidth,
+            "LEFT", tab.activeL, "RIGHT", 0, 0, TC_MID)
+        tab.activeR = CreateTabTexPiece(tab, tabName.."AR", TEX_ACTIVE, CAP_WIDTH,
+            "LEFT", tab.activeM, "RIGHT", 0, 0, TC_RIGHT)
+        tab.activeL:Hide()
+        tab.activeM:Hide()
+        tab.activeR:Hide()
+
+        -- Inactive tab art — 3 pieces anchored at TOPLEFT
+        tab.inactiveL = CreateTabTexPiece(tab, tabName.."IL", TEX_INACTIVE, CAP_WIDTH,
+            "TOPLEFT", tab, "TOPLEFT", 0, 0, TC_LEFT)
+        tab.inactiveM = CreateTabTexPiece(tab, tabName.."IM", TEX_INACTIVE, midWidth,
+            "LEFT", tab.inactiveL, "RIGHT", 0, 0, TC_MID)
+        tab.inactiveR = CreateTabTexPiece(tab, tabName.."IR", TEX_INACTIVE, CAP_WIDTH,
+            "LEFT", tab.inactiveM, "RIGHT", 0, 0, TC_RIGHT)
+
+        -- Highlight
+        tab:SetHighlightTexture(TEX_HIGHLIGHT, "ADD")
+        local hl = tab:GetHighlightTexture()
+        hl:ClearAllPoints()
+        hl:SetPoint("LEFT", tab, "LEFT", 10, -4)
+        hl:SetPoint("RIGHT", tab, "RIGHT", -10, -4)
+
+        -- Label with proper left/right padding
+        tab.label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        tab.label:SetPoint("LEFT", 14, -3)
+        tab.label:SetPoint("RIGHT", -12, -3)
+        tab.label:SetText(name)
+
+        tab:SetScript("OnClick", function()
+            if SOUNDKIT then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
+            UI:SelectTab(i)
         end)
 
-        prevBtn = btn
+        tabs[i] = tab
     end
 
-    return bar
+    self:UpdateTabStyles()
 end
 
--- ============================================================
--- Column header — anchored below filter bar
--- ============================================================
-local COLUMNS = {
-    { label = "Date",     width = 90 },
-    { label = "BG",       width = 40 },
-    { label = "Type",     width = 45 },
-    { label = "Result",   width = 45 },
-    { label = "Duration", width = 60 },
-    { label = "KB",       width = 35 },
-    { label = "HK",       width = 35 },
-    { label = "Deaths",   width = 45 },
-    { label = "Honor",    width = 50 },
-    { label = "Damage",   width = 65 },
-    { label = "Healing",  width = 65 },
-    { label = "BG Stat",  width = 80 },
-}
+function UI:UpdateTabStyles()
+    for i = 1, #TAB_NAMES do
+        local tab = tabs[i]
+        if not tab then return end
 
-local function CreateColumnHeader(parent)
-    local header = CreateFrame("Frame", nil, parent)
-    header:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, COLUMN_HEADER_Y)
-    header:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -12, COLUMN_HEADER_Y)
-    header:SetHeight(HEADER_HEIGHT)
-
-    local xOffset = 0
-    for _, col in ipairs(COLUMNS) do
-        local text = header:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        text:SetPoint("LEFT", header, "LEFT", xOffset, 0)
-        text:SetWidth(col.width)
-        text:SetJustifyH("LEFT")
-        text:SetText(col.label)
-        xOffset = xOffset + col.width
-    end
-
-    return header
-end
-
--- ============================================================
--- Match row creation
--- ============================================================
-local function CreateMatchRow(parent, index)
-    local row = CreateFrame("Button", nil, parent)
-    row:SetHeight(ROW_HEIGHT)
-    row:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -((index - 1) * ROW_HEIGHT))
-    row:SetPoint("TOPRIGHT", parent, "TOPRIGHT", 0, -((index - 1) * ROW_HEIGHT))
-
-    -- Highlight on hover
-    row:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
-
-    -- Alt-row background
-    if index % 2 == 0 then
-        local bg = row:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(1, 1, 1, 0.03)
-    end
-
-    -- Create text columns
-    row.texts = {}
-    local xOffset = 0
-    for _, col in ipairs(COLUMNS) do
-        local text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-        text:SetPoint("LEFT", row, "LEFT", xOffset, 0)
-        text:SetWidth(col.width)
-        text:SetJustifyH("LEFT")
-        table.insert(row.texts, text)
-        xOffset = xOffset + col.width
-    end
-
-    row.matchData = nil
-    row:SetScript("OnClick", function(self)
-        if self.matchData then
-            UI:ShowMatchDetail(self.matchData)
-        end
-    end)
-
-    return row
-end
-
--- ============================================================
--- Format BG-specific stat for the summary column
--- ============================================================
-local function FormatBGStatSummary(match)
-    local ps = match.playerStats
-    if not ps then return "" end
-
-    local loc = match.location
-    if loc == "Warsong Gulch" then
-        local caps = ps.flagsCaptured or 0
-        local rets = ps.flagsReturned or 0
-        return caps .. "C/" .. rets .. "R"
-    elseif loc == "Arathi Basin" then
-        local assaulted = ps.basesAssaulted or 0
-        local defended  = ps.basesDefended or 0
-        return assaulted .. "A/" .. defended .. "D"
-    end
-
-    return ""
-end
-
--- ============================================================
--- Populate a row with match data
--- ============================================================
-local function SetRowData(row, match)
-    row.matchData = match
-    local ps = match.playerStats or {}
-    local texts = row.texts
-
-    texts[1]:SetText(Utils.FormatDateTime(match.endTime or match.startTime))
-    texts[2]:SetText(Utils.ShortBGName(match.location))
-    texts[3]:SetText(match.queueType or "?")
-    texts[4]:SetText(Utils.ColorResult(match.result))
-    texts[5]:SetText(Utils.FormatDuration(match.duration))
-    texts[6]:SetText(ps.killingBlows or 0)
-    texts[7]:SetText(ps.honorableKills or 0)
-    texts[8]:SetText(ps.deaths or 0)
-    texts[9]:SetText(Utils.FormatNumber(ps.honorGained))
-    texts[10]:SetText(Utils.FormatNumber(ps.damageDone))
-    texts[11]:SetText(Utils.FormatNumber(ps.healingDone))
-    texts[12]:SetText(FormatBGStatSummary(match))
-end
-
-local function ClearRow(row)
-    row.matchData = nil
-    for _, text in ipairs(row.texts) do
-        text:SetText("")
-    end
-end
-
--- ============================================================
--- Row container — anchored below column header (no scroll frame for now)
--- ============================================================
-local function CreateRowContainer(parent)
-    local container = CreateFrame("Frame", nil, parent)
-    container:SetPoint("TOPLEFT", parent, "TOPLEFT", 12, LIST_Y)
-    container:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -12, 10)
-
-    for i = 1, VISIBLE_ROWS do
-        rowFrames[i] = CreateMatchRow(container, i)
-    end
-
-    return container
-end
-
--- ============================================================
--- Filter matches based on active filters
--- ============================================================
-local function GetFilteredMatches()
-    if not PvPStats.db or not PvPStats.db.matches then return {} end
-
-    local filtered = {}
-    for _, match in ipairs(PvPStats.db.matches) do
-        local pass = true
-
-        if activeFilters.queueType and match.queueType ~= activeFilters.queueType then
-            pass = false
-        end
-        if activeFilters.location and match.location ~= activeFilters.location then
-            pass = false
-        end
-
-        if pass then
-            table.insert(filtered, match)
-        end
-    end
-
-    -- Newest first
-    table.sort(filtered, function(a, b)
-        return (a.endTime or a.startTime or 0) > (b.endTime or b.startTime or 0)
-    end)
-
-    return filtered
-end
-
--- ============================================================
--- Refresh the match list display
--- ============================================================
-local rowContainer = nil
-local filteredMatches = {}
-local displayOffset = 0
-
-function UI:RefreshMatchList()
-    filteredMatches = GetFilteredMatches()
-
-    if not rowContainer then return end
-
-    local total = #filteredMatches
-
-    for i = 1, VISIBLE_ROWS do
-        local dataIdx = displayOffset + i
-        if dataIdx <= total then
-            SetRowData(rowFrames[i], filteredMatches[dataIdx])
-            rowFrames[i]:Show()
+        if i == selectedTab then
+            -- Show active art, hide inactive
+            tab.activeL:Show()
+            tab.activeM:Show()
+            tab.activeR:Show()
+            tab.inactiveL:Hide()
+            tab.inactiveM:Hide()
+            tab.inactiveR:Hide()
+            tab.label:SetTextColor(1.0, 0.82, 0.0)
         else
-            ClearRow(rowFrames[i])
-            rowFrames[i]:Hide()
-        end
-    end
-end
-
--- ============================================================
--- Match detail panel (FontString-based, no EditBox)
--- ============================================================
-local detailFrame = nil
-
-local function CreateDetailFrame(parent)
-    local f = CreateFrame("Frame", "PvPStatsDetailFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(FRAME_WIDTH, 400)
-    f:SetPoint("TOP", parent, "BOTTOM", 0, -4)
-    f:SetMovable(true)
-    f:EnableMouse(true)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", f.StartMoving)
-    f:SetScript("OnDragStop", f.StopMovingOrSizing)
-    f:SetFrameStrata("DIALOG")
-
-    if f.TitleText then
-        f.TitleText:SetText("Match Detail")
-    end
-
-    -- Scrolling text area using FontString (no EditBox = no focus stealing)
-    local sf = CreateFrame("ScrollFrame", "PvPStatsDetailScroll", f, "UIPanelScrollFrameTemplate")
-    sf:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -30)
-    sf:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -32, 10)
-
-    local content = CreateFrame("Frame", nil, sf)
-    content:SetWidth(FRAME_WIDTH - 60)
-
-    local text = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    text:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-    text:SetPoint("TOPRIGHT", content, "TOPRIGHT", 0, 0)
-    text:SetJustifyH("LEFT")
-    text:SetJustifyV("TOP")
-    text:SetSpacing(2)
-
-    sf:SetScrollChild(content)
-
-    f.content = content
-    f.text = text
-    f:Hide()
-    return f
-end
-
--- Build a text dump of the full scoreboard for a match
-local function BuildScoreboardText(match)
-    local lines = {}
-
-    table.insert(lines, "=== " .. (match.location or "Unknown") .. " ===")
-    table.insert(lines, "Date: " .. Utils.FormatDateTime(match.endTime or match.startTime))
-    table.insert(lines, "Result: " .. (match.result or "N/A")
-        .. "  |  Duration: " .. Utils.FormatDuration(match.duration)
-        .. "  |  Queue: " .. (match.queueType or "?"))
-    table.insert(lines, "")
-
-    -- Column headers for BG-specific stats
-    local bgCols = match.bgStatColumns or {}
-    local bgHeader = ""
-    for _, col in ipairs(bgCols) do
-        bgHeader = bgHeader .. "  " .. col
-    end
-
-    -- Separate by faction
-    local horde, alliance = {}, {}
-    if match.scoreboard then
-        for _, p in ipairs(match.scoreboard) do
-            if p.faction == 0 then
-                table.insert(horde, p)
+            -- Show inactive art, hide active
+            tab.activeL:Hide()
+            tab.activeM:Hide()
+            tab.activeR:Hide()
+            tab.inactiveL:Show()
+            tab.inactiveM:Show()
+            tab.inactiveR:Show()
+            if ENABLED_TABS[i] then
+                tab.label:SetTextColor(0.85, 0.85, 0.85)
             else
-                table.insert(alliance, p)
+                tab.label:SetTextColor(0.5, 0.5, 0.5)
             end
         end
     end
+end
 
-    for _, group in ipairs({
-        { label = "--- HORDE ---", players = horde },
-        { label = "--- ALLIANCE ---", players = alliance },
-    }) do
-        table.insert(lines, group.label)
-        table.insert(lines, string.format("  %-20s %-10s %5s %5s %5s %7s %8s %8s%s",
-            "Name", "Class", "KB", "HK", "D", "Honor", "Damage", "Healing", bgHeader))
+-- ============================================================
+-- View management
+-- ============================================================
+function UI:SelectTab(index)
+    selectedTab = index
+    self:UpdateTabStyles()
 
-        for _, p in ipairs(group.players) do
-            local bgVals = ""
-            for j = 1, #bgCols do
-                bgVals = bgVals .. string.format("  %5d", (p.bgStats and p.bgStats[j]) or 0)
-            end
-
-            table.insert(lines, string.format("  %-20s %-10s %5d %5d %5d %7s %8s %8s%s",
-                p.name or "?",
-                p.class or "?",
-                p.killingBlows or 0,
-                p.honorableKills or 0,
-                p.deaths or 0,
-                Utils.FormatNumber(p.honorGained),
-                Utils.FormatNumber(p.damageDone),
-                Utils.FormatNumber(p.healingDone),
-                bgVals))
-        end
-        table.insert(lines, "")
+    if ENABLED_TABS[index] then
+        comingSoonText:Hide()
+        self:ShowView("list")
+    else
+        self:HideAllViews()
+        comingSoonText:Show()
+        currentView = "comingSoon"
     end
+end
 
-    return table.concat(lines, "\n")
+function UI:HideAllViews()
+    comingSoonText:Hide()
+    if PvPStats.BGListView and PvPStats.BGListView.frame then
+        PvPStats.BGListView.frame:Hide()
+    end
+    if PvPStats.BGDetailView and PvPStats.BGDetailView.frame then
+        PvPStats.BGDetailView.frame:Hide()
+    end
+end
+
+function UI:ShowView(view)
+    self:HideAllViews()
+    currentView = view
+
+    if view == "list" and PvPStats.BGListView then
+        if PvPStats.BGListView.frame then
+            PvPStats.BGListView.frame:Show()
+        end
+        PvPStats.BGListView:Refresh()
+    elseif view == "detail" and PvPStats.BGDetailView then
+        if PvPStats.BGDetailView.frame then
+            PvPStats.BGDetailView.frame:Show()
+        end
+    end
 end
 
 function UI:ShowMatchDetail(match)
-    if not detailFrame then
-        detailFrame = CreateDetailFrame(mainFrame)
+    if PvPStats.BGDetailView then
+        PvPStats.BGDetailView:SetMatch(match)
     end
-
-    local text = BuildScoreboardText(match)
-    detailFrame.text:SetText(text)
-    -- Resize content frame to fit the text
-    detailFrame.content:SetHeight(detailFrame.text:GetStringHeight() + 20)
-
-    if detailFrame.TitleText then
-        detailFrame.TitleText:SetText("Match Detail — " .. Utils.ShortBGName(match.location)
-            .. " " .. Utils.FormatDateTime(match.endTime or match.startTime))
-    end
-    detailFrame:Show()
+    self:ShowView("detail")
 end
 
 -- ============================================================
--- Toggle main frame
+-- Public API
 -- ============================================================
 function UI:Toggle()
-    if not mainFrame then
-        mainFrame = CreateMainFrame()
-        CreateFilterBar(mainFrame)
-        CreateColumnHeader(mainFrame)
-        rowContainer = CreateRowContainer(mainFrame)
-    end
-
+    self:Init()
     if mainFrame:IsShown() then
+        forceClose = true
         mainFrame:Hide()
-        if detailFrame then detailFrame:Hide() end
     else
-        UI:RefreshMatchList()
         mainFrame:Show()
+        self:SelectTab(1)
     end
 end

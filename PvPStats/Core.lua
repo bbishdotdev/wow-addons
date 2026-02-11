@@ -62,51 +62,6 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 end)
 
 -- ============================================================
--- Data migration: fix off-by-one shift from v0.1.0 GetBattlefieldScore bug
--- Detects affected entries by checking if damageDone is a string (classToken)
--- ============================================================
-function PvPStats:MigrateData()
-    if not self.db or not self.db.matches then return end
-
-    local migrated = 0
-    for _, match in ipairs(self.db.matches) do
-        -- Fix scoreboard entries
-        if match.scoreboard then
-            for _, p in ipairs(match.scoreboard) do
-                if type(p.damageDone) == "string" then
-                    -- Shift fields back to correct positions
-                    -- Old: race=mystery, class=race, classToken=class, damageDone=classToken, healingDone=dmg
-                    local realRace = p.class           -- "Human", "Gnome", etc.
-                    local realClass = p.classToken      -- "Rogue", "Warrior", etc.
-                    local realClassToken = p.damageDone -- "ROGUE", "WARRIOR", etc.
-                    local realDamageDone = p.healingDone -- actual damage number
-                    -- healingDone was never captured (12th return), lost forever
-
-                    p.race = realRace
-                    p.class = realClass
-                    p.classToken = realClassToken
-                    p.damageDone = realDamageDone or 0
-                    p.healingDone = 0  -- unrecoverable
-                    migrated = migrated + 1
-                end
-            end
-        end
-
-        -- Fix playerStats (same shift but fewer fields)
-        local ps = match.playerStats
-        if ps and type(ps.damageDone) == "string" then
-            ps.damageDone = ps.healingDone or 0
-            ps.healingDone = 0
-        end
-
-    end
-
-    if migrated > 0 then
-        self:Print("Migrated " .. migrated .. " scoreboard entries (v0.1.0 fix).")
-    end
-end
-
--- ============================================================
 -- SavedVariables initialization on login
 -- ============================================================
 local function OnPlayerLogin()
@@ -121,9 +76,6 @@ local function OnPlayerLogin()
     end
 
     PvPStats.db = PvPStatsDB
-
-    -- Run data migrations before anything else touches the DB
-    PvPStats:MigrateData()
 
     PvPStats:Print("v" .. PvPStats.VERSION .. " loaded. Type /pvpstats to open.")
 
