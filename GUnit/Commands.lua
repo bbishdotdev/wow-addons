@@ -35,6 +35,7 @@ local function AddFromTargetUnit()
     HitList:UpdateValidationFromUnit(targetName, "target")
     SaveAndBroadcast(created)
     GUnit:Print("Hit added: " .. targetName .. " (one-time, no bounty).")
+    Utils.SendGuildChat(Utils.PlayerName() .. " has placed a hit on " .. targetName .. ".")
 end
 
 local function AddByName(name)
@@ -45,6 +46,7 @@ local function AddByName(name)
     end
     SaveAndBroadcast(target)
     GUnit:Print("Hit added: " .. target.name .. " (unverified, one-time, no bounty).")
+    Utils.SendGuildChat(Utils.PlayerName() .. " has placed a hit on " .. target.name .. ".")
 end
 
 local function DoRemove(name)

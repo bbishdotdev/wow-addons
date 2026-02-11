@@ -10,6 +10,7 @@ Core.lua
 HitList.lua
 Comm.lua
 Sync.lua
+BountyTrade.lua
 Tracking.lua
 UI.lua
 Commands.lua

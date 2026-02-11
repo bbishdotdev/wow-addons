@@ -8,6 +8,7 @@ local HIT_MODE_ONE_TIME = "one_time"
 local HIT_MODE_KOS = "kos"
 local HIT_STATUS_ACTIVE = "active"
 local HIT_STATUS_COMPLETED = "completed"
+local HIT_STATUS_CLOSED = "closed"
 local BOUNTY_MODE_NONE = "none"
 local BOUNTY_MODE_FIRST = "first_kill"
 local BOUNTY_MODE_INFINITE = "infinite"
@@ -54,6 +55,7 @@ function HitList:Constants()
         HIT_MODE_KOS = HIT_MODE_KOS,
         HIT_STATUS_ACTIVE = HIT_STATUS_ACTIVE,
         HIT_STATUS_COMPLETED = HIT_STATUS_COMPLETED,
+        HIT_STATUS_CLOSED = HIT_STATUS_CLOSED,
         BOUNTY_MODE_NONE = BOUNTY_MODE_NONE,
         BOUNTY_MODE_FIRST = BOUNTY_MODE_FIRST,
         BOUNTY_MODE_INFINITE = BOUNTY_MODE_INFINITE,
@@ -196,7 +198,7 @@ function HitList:SetHitStatus(name, status, actorName)
     local target = self:Get(name)
     if not target then return nil, "Target not found." end
     if not self:CanMutate(target, actorName) then return nil, "Only submitter can change status." end
-    if status ~= HIT_STATUS_ACTIVE and status ~= HIT_STATUS_COMPLETED then
+    if status ~= HIT_STATUS_ACTIVE and status ~= HIT_STATUS_COMPLETED and status ~= HIT_STATUS_CLOSED then
         return nil, "Invalid hit status."
     end
     target.hitStatus = status
@@ -302,7 +304,8 @@ function HitList:ApplyKill(targetName, killerName, zone, ts)
 
     if target.bountyAmount and target.bountyAmount > 0 then
         target.bountyClaims = target.bountyClaims or {}
-        local existing = target.bountyClaims[killer] or { totalCopper = 0, claimCount = 0, lastClaimAt = 0 }
+        local existing = target.bountyClaims[killer] or { totalCopper = 0, paidCopper = 0, claimCount = 0, lastClaimAt = 0 }
+        existing.paidCopper = existing.paidCopper or 0
         if target.bountyMode == BOUNTY_MODE_FIRST and target.bountyStatus ~= BOUNTY_STATUS_CLAIMED then
             existing.totalCopper = existing.totalCopper + target.bountyAmount
             existing.claimCount = existing.claimCount + 1
@@ -319,6 +322,36 @@ function HitList:ApplyKill(targetName, killerName, zone, ts)
 
     target.updatedAt = now
     return CloneEntry(target)
+end
+
+function HitList:RecordBountyPayment(targetName, killerName, copperPaid)
+    local target = self:Get(targetName)
+    if not target then return nil, "Target not found." end
+
+    local killer = Utils.NormalizeName(killerName)
+    if not killer then return nil, "Invalid killer name." end
+
+    target.bountyClaims = target.bountyClaims or {}
+    local claim = target.bountyClaims[killer]
+    if not claim then return nil, "No bounty claim found for " .. killer end
+
+    claim.paidCopper = claim.paidCopper or 0
+    claim.paidCopper = math.min(claim.totalCopper, claim.paidCopper + copperPaid)
+    target.updatedAt = Utils.Now()
+    return target
+end
+
+function HitList:GetBountyOwed(targetName, killerName)
+    local target = self:Get(targetName)
+    if not target then return 0 end
+
+    local killer = Utils.NormalizeName(killerName)
+    if not killer then return 0 end
+
+    local claim = target.bountyClaims and target.bountyClaims[killer]
+    if not claim then return 0 end
+
+    return math.max(0, (claim.totalCopper or 0) - (claim.paidCopper or 0))
 end
 
 local FIELD_SEP = ";"

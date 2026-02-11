@@ -25,7 +25,14 @@ local function BuildClaimsText(target)
     local claims = target.bountyClaims or {}
     local lines = {}
     for killer, data in pairs(claims) do
-        table.insert(lines, killer .. ": " .. Utils.GoldStringFromCopper(data.totalCopper) .. " (" .. (data.claimCount or 0) .. " claim)")
+        local owed = math.max(0, (data.totalCopper or 0) - (data.paidCopper or 0))
+        local paid = data.paidCopper or 0
+        local status = owed > 0 and ("owed " .. Utils.GoldStringFromCopper(owed)) or "PAID"
+        local line = killer .. ": " .. Utils.GoldStringFromCopper(data.totalCopper) .. " (" .. (data.claimCount or 0) .. " kill) - " .. status
+        if paid > 0 and owed > 0 then
+            line = line .. " (paid " .. Utils.GoldStringFromCopper(paid) .. ")"
+        end
+        table.insert(lines, line)
     end
     table.sort(lines)
     if #lines == 0 then
@@ -34,9 +41,40 @@ local function BuildClaimsText(target)
     return table.concat(lines, "\n")
 end
 
+local function FormatBountyColumn(target)
+    local amount = target.bountyAmount or 0
+    if amount <= 0 then return "None" end
+    local status = target.bountyStatus or "open"
+    -- Check if all claims are fully paid
+    local allPaid = true
+    if target.bountyClaims then
+        for _, claim in pairs(target.bountyClaims) do
+            if (claim.totalCopper or 0) - (claim.paidCopper or 0) > 0 then
+                allPaid = false
+                break
+            end
+        end
+    end
+    local label
+    if status == "claimed" and allPaid then
+        label = "Paid"
+    elseif status == "claimed" then
+        label = "Owed"
+    else
+        label = "Open"
+    end
+    return Utils.GoldStringFromCopper(amount) .. " (" .. label .. ")"
+end
+
 function UI:RefreshList()
     self.names = HitList:SortedNamesForCurrentGuild()
     local startIndex = self.pageOffset + 1
+
+    -- Update title with current guild
+    if self.title then
+        local guildTitle = Utils.GuildName() or "Personal"
+        self.title:SetText(guildTitle .. " Kill Targets")
+    end
 
     for rowIndex = 1, ROWS_PER_PAGE do
         local listIndex = startIndex + rowIndex - 1
@@ -44,16 +82,23 @@ function UI:RefreshList()
         local name = self.names[listIndex]
         if name then
             local target = HitList:Get(name)
-            local line = name .. " | " .. target.submitter .. " | Kills: " .. (target.killCount or 0)
-            if target.hitStatus == "completed" then
-                line = line .. " | COMPLETED"
-            end
             row.name = name
-            row.text:SetText(line)
+            row.colName:SetText(name)
+            row.colRace:SetText(target.race or "-")
+            row.colClass:SetText(target.classToken or "-")
+            local statusLabels = { active = "Active", completed = "Done", closed = "Closed" }
+            row.colStatus:SetText(statusLabels[target.hitStatus] or "Active")
+            row.colBounty:SetText(FormatBountyColumn(target))
+            row.colSubmitter:SetText(target.submitter or "-")
             row:Show()
         else
             row.name = nil
-            row.text:SetText("")
+            row.colName:SetText("")
+            row.colRace:SetText("")
+            row.colClass:SetText("")
+            row.colStatus:SetText("")
+            row.colBounty:SetText("")
+            row.colSubmitter:SetText("")
             row:Hide()
         end
     end
@@ -69,9 +114,10 @@ function UI:RefreshDetails()
         self.detailText:SetText("Select a target from the list.")
         self.reasonEdit:SetText("")
         self.bountyEdit:SetText("")
-        self.hitModeButton:SetText("Hit Mode")
-        self.bountyModeButton:SetText("Bounty Mode")
-        self.statusButton:SetText("Status")
+        if self.hitModeDropdown then UIDropDownMenu_SetText(self.hitModeDropdown, "Kill on Sight") end
+        if self.bountyModeDropdown then UIDropDownMenu_SetText(self.bountyModeDropdown, "Bounty Payout") end
+        if self.callOffButton then self.callOffButton:Hide() end
+        if self.reopenButton then self.reopenButton:Hide() end
         return
     end
 
@@ -84,7 +130,7 @@ function UI:RefreshDetails()
         "Reason: " .. (target.reason ~= "" and target.reason or "None"),
         "Bounty: " .. Utils.GoldStringFromCopper(target.bountyAmount or 0),
         "Modes: " .. ModeLabel(target),
-        "Hit Status: " .. (target.hitStatus or "active"),
+        "Hit Status: " .. ({ active = "Active", completed = "Done", closed = "Closed" })[target.hitStatus or "active"] or "Active",
         "Bounty Status: " .. (target.bountyStatus or "open"),
         "Class/Race/Faction: " .. classLine .. " / " .. raceLine .. " / " .. factionLine,
         "Kill Count: " .. (target.killCount or 0),
@@ -94,10 +140,32 @@ function UI:RefreshDetails()
 
     self.detailText:SetText(detail)
     self.reasonEdit:SetText(target.reason or "")
-    self.bountyEdit:SetText(string.format("%.2f", (target.bountyAmount or 0) / 10000))
-    self.hitModeButton:SetText("Hit: " .. (target.hitMode == "kos" and "KOS" or "One-time"))
-    self.bountyModeButton:SetText("Bounty: " .. (target.bountyMode or "none"))
-    self.statusButton:SetText("Status: " .. (target.hitStatus or "active"))
+    self.bountyEdit:SetText(tostring(math.floor((target.bountyAmount or 0) / 10000)))
+
+    local hitModeLabel = target.hitMode == "kos" and "Indefinitely" or "One-time"
+    if self.hitModeDropdown then UIDropDownMenu_SetText(self.hitModeDropdown, hitModeLabel) end
+
+    local bountyModeLabels = { none = "None", first_kill = "One-time", infinite = "Indefinitely" }
+    local bountyLabel = bountyModeLabels[target.bountyMode] or "None"
+    if self.bountyModeDropdown then UIDropDownMenu_SetText(self.bountyModeDropdown, bountyLabel) end
+
+    local isSubmitter = Utils.IsSubmitter(target)
+    local isActive = target.hitStatus == "active"
+
+    if self.callOffButton then
+        if isSubmitter and isActive then
+            self.callOffButton:Show()
+        else
+            self.callOffButton:Hide()
+        end
+    end
+    if self.reopenButton then
+        if isSubmitter and not isActive then
+            self.reopenButton:Show()
+        else
+            self.reopenButton:Hide()
+        end
+    end
 end
 
 function UI:Refresh()
@@ -149,9 +217,10 @@ function UI:Init()
     frame:Hide()
     self.frame = frame
 
-    local title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    title:SetPoint("TOP", frame, "TOP", 0, -12)
-    title:SetText("G-Unit Hit List")
+    self.title = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    self.title:SetPoint("TOP", frame, "TOP", 0, -12)
+    local guildTitle = Utils.GuildName() or "Personal"
+    self.title:SetText(guildTitle .. " Kill Targets")
 
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
@@ -161,16 +230,62 @@ function UI:Init()
     self.rows = {}
     self.selectedName = nil
 
-    local listHeader = MakeLabel(frame, "Targets", 16, -40)
-    listHeader:SetTextColor(1, 0.8, 0.1)
+    -- Column headers
+    local COL_NAME_X = 16
+    local COL_RACE_X = 120
+    local COL_CLASS_X = 190
+    local COL_STATUS_X = 260
+    local COL_BOUNTY_X = 330
+    local COL_SUBMITTER_X = 400
+
+    local colY = -40
+    local colName = MakeLabel(frame, "Name", COL_NAME_X, colY)
+    colName:SetTextColor(1, 0.8, 0.1)
+    local colRace = MakeLabel(frame, "Race", COL_RACE_X, colY)
+    colRace:SetTextColor(1, 0.8, 0.1)
+    local colClass = MakeLabel(frame, "Class", COL_CLASS_X, colY)
+    colClass:SetTextColor(1, 0.8, 0.1)
+    local colStatus = MakeLabel(frame, "Status", COL_STATUS_X, colY)
+    colStatus:SetTextColor(1, 0.8, 0.1)
+    local colBounty = MakeLabel(frame, "Bounty", COL_BOUNTY_X, colY)
+    colBounty:SetTextColor(1, 0.8, 0.1)
+    local colSubmitter = MakeLabel(frame, "Submitter", COL_SUBMITTER_X, colY)
+    colSubmitter:SetTextColor(1, 0.8, 0.1)
 
     for i = 1, ROWS_PER_PAGE do
         local row = CreateFrame("Button", nil, frame)
-        row:SetSize(420, 22)
-        row:SetPoint("TOPLEFT", frame, "TOPLEFT", 16, -60 - ((i - 1) * 24))
-        row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        row.text:SetAllPoints()
-        row.text:SetJustifyH("LEFT")
+        row:SetSize(440, 22)
+        row:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, -56 - ((i - 1) * 24))
+        row.colName = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.colName:SetPoint("LEFT", row, "LEFT", COL_NAME_X, 0)
+        row.colName:SetWidth(100)
+        row.colName:SetJustifyH("LEFT")
+
+        row.colRace = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.colRace:SetPoint("LEFT", row, "LEFT", COL_RACE_X, 0)
+        row.colRace:SetWidth(66)
+        row.colRace:SetJustifyH("LEFT")
+
+        row.colClass = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.colClass:SetPoint("LEFT", row, "LEFT", COL_CLASS_X, 0)
+        row.colClass:SetWidth(66)
+        row.colClass:SetJustifyH("LEFT")
+
+        row.colStatus = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.colStatus:SetPoint("LEFT", row, "LEFT", COL_STATUS_X, 0)
+        row.colStatus:SetWidth(66)
+        row.colStatus:SetJustifyH("LEFT")
+
+        row.colBounty = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.colBounty:SetPoint("LEFT", row, "LEFT", COL_BOUNTY_X, 0)
+        row.colBounty:SetWidth(66)
+        row.colBounty:SetJustifyH("LEFT")
+
+        row.colSubmitter = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        row.colSubmitter:SetPoint("LEFT", row, "LEFT", COL_SUBMITTER_X, 0)
+        row.colSubmitter:SetWidth(66)
+        row.colSubmitter:SetJustifyH("LEFT")
+
         row:SetScript("OnClick", function(selfRow)
             UI.selectedName = selfRow.name
             UI:RefreshDetails()
@@ -212,106 +327,192 @@ function UI:Init()
     self.detailText:SetText("Select a target from the list.")
 
     MakeLabel(frame, "Reason", 460, -300)
-    self.reasonEdit = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
-    self.reasonEdit:SetSize(280, 24)
-    self.reasonEdit:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -320)
-    self.reasonEdit:SetAutoFocus(false)
+    local reasonScroll = CreateFrame("ScrollFrame", "GUnitReasonScroll", frame, "UIPanelScrollFrameTemplate")
+    reasonScroll:SetSize(320, 60)
+    reasonScroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -316)
 
-    local saveReason = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    saveReason:SetSize(120, 24)
-    saveReason:SetPoint("LEFT", self.reasonEdit, "RIGHT", 8, 0)
-    saveReason:SetText("Save Reason")
-    saveReason:SetScript("OnClick", function()
+    self.reasonEdit = CreateFrame("EditBox", "GUnitReasonEdit", reasonScroll)
+    self.reasonEdit:SetMultiLine(true)
+    self.reasonEdit:SetFontObject("ChatFontNormal")
+    self.reasonEdit:SetWidth(300)
+    self.reasonEdit:SetAutoFocus(false)
+    self.reasonEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
+    self.reasonEdit:SetScript("OnEditFocusLost", function()
         local target = RequireSelectedTarget()
         if not target then return end
-        local updated, err = HitList:SetReason(target.name, UI.reasonEdit:GetText(), Utils.PlayerName())
-        if not updated then
-            GUnit:Print(err)
-            return
-        end
+        local newReason = UI.reasonEdit:GetText()
+        if newReason == (target.reason or "") then return end
+        local updated, err = HitList:SetReason(target.name, newReason, Utils.PlayerName())
+        if not updated then return end
         SaveTargetAndBroadcast(updated)
     end)
+    reasonScroll:SetScrollChild(self.reasonEdit)
 
-    MakeLabel(frame, "Bounty (gold)", 460, -356)
+    -- Reason box backdrop
+    local reasonBg = CreateFrame("Frame", nil, frame, "BackdropTemplate")
+    reasonBg:SetPoint("TOPLEFT", reasonScroll, "TOPLEFT", -4, 4)
+    reasonBg:SetPoint("BOTTOMRIGHT", reasonScroll, "BOTTOMRIGHT", 22, -4)
+    reasonBg:SetBackdrop({
+        bgFile = "Interface/Tooltips/UI-Tooltip-Background",
+        edgeFile = "Interface/Tooltips/UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 2, right = 2, top = 2, bottom = 2 },
+    })
+    reasonBg:SetBackdropColor(0, 0, 0, 0.5)
+    reasonBg:SetFrameLevel(frame:GetFrameLevel())
+
+    MakeLabel(frame, "Bounty (gold)", 460, -392)
     self.bountyEdit = CreateFrame("EditBox", nil, frame, "InputBoxTemplate")
     self.bountyEdit:SetSize(120, 24)
-    self.bountyEdit:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -376)
+    self.bountyEdit:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -408)
     self.bountyEdit:SetAutoFocus(false)
-
-    local saveBounty = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    saveBounty:SetSize(120, 24)
-    saveBounty:SetPoint("LEFT", self.bountyEdit, "RIGHT", 8, 0)
-    saveBounty:SetText("Save Bounty")
-    saveBounty:SetScript("OnClick", function()
+    self.bountyEdit:SetNumeric(true)
+    self.bountyEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
+    self.bountyEdit:SetScript("OnEnterPressed", function(eb) eb:ClearFocus() end)
+    self.bountyEdit:SetScript("OnEditFocusLost", function()
         local target = RequireSelectedTarget()
         if not target then return end
-        local copper = Utils.CopperFromGoldString(UI.bountyEdit:GetText())
-        if not copper then
-            GUnit:Print("Invalid bounty amount.")
-            return
-        end
+        local gold = tonumber(UI.bountyEdit:GetText())
+        if not gold or gold < 0 then return end
+        local copper = gold * 10000
+        if copper == (target.bountyAmount or 0) then return end
         local updated, err = HitList:SetBountyAmount(target.name, copper, Utils.PlayerName())
-        if not updated then
-            GUnit:Print(err)
-            return
-        end
+        if not updated then return end
         SaveTargetAndBroadcast(updated)
     end)
 
-    self.hitModeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    self.hitModeButton:SetSize(130, 24)
-    self.hitModeButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -420)
-    self.hitModeButton:SetText("Hit: One-time")
-    self.hitModeButton:SetScript("OnClick", function()
-        local target = RequireSelectedTarget()
-        if not target then return end
-        local newMode = target.hitMode == "kos" and "one_time" or "kos"
-        local updated, err = HitList:SetHitMode(target.name, newMode, Utils.PlayerName())
-        if not updated then
-            GUnit:Print(err)
-            return
+    -- Kill on Sight dropdown
+    MakeLabel(frame, "Kill on Sight", 460, -442)
+    self.hitModeDropdown = CreateFrame("Frame", "GUnitHitModeDropdown", frame, "UIDropDownMenuTemplate")
+    self.hitModeDropdown:SetPoint("TOPLEFT", frame, "TOPLEFT", 548, -438)
+    UIDropDownMenu_SetWidth(self.hitModeDropdown, 100)
+    UIDropDownMenu_SetText(self.hitModeDropdown, "One-time")
+    UIDropDownMenu_Initialize(self.hitModeDropdown, function(dropdown, level)
+        local options = {
+            { text = "One-time", value = "one_time" },
+            { text = "Indefinitely", value = "kos" },
+        }
+        for _, opt in ipairs(options) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = opt.text
+            info.value = opt.value
+            info.func = function(btn)
+                local target = RequireSelectedTarget()
+                if not target then return end
+                local updated, err = HitList:SetHitMode(target.name, btn.value, Utils.PlayerName())
+                if not updated then
+                    GUnit:Print(err)
+                    return
+                end
+                UIDropDownMenu_SetText(dropdown, btn:GetText())
+                SaveTargetAndBroadcast(updated)
+            end
+            info.checked = nil
+            UIDropDownMenu_AddButton(info, level)
         end
-        SaveTargetAndBroadcast(updated)
     end)
 
-    self.bountyModeButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    self.bountyModeButton:SetSize(150, 24)
-    self.bountyModeButton:SetPoint("LEFT", self.hitModeButton, "RIGHT", 8, 0)
-    self.bountyModeButton:SetText("Bounty: none")
-    self.bountyModeButton:SetScript("OnClick", function()
-        local target = RequireSelectedTarget()
-        if not target then return end
-        local nextMode
-        if target.bountyMode == "none" then
-            nextMode = "first_kill"
-        elseif target.bountyMode == "first_kill" then
-            nextMode = "infinite"
-        else
-            nextMode = "none"
+    -- Bounty Payout dropdown
+    MakeLabel(frame, "Bounty Payout", 460, -474)
+    self.bountyModeDropdown = CreateFrame("Frame", "GUnitBountyModeDropdown", frame, "UIDropDownMenuTemplate")
+    self.bountyModeDropdown:SetPoint("TOPLEFT", frame, "TOPLEFT", 548, -470)
+    UIDropDownMenu_SetWidth(self.bountyModeDropdown, 100)
+    UIDropDownMenu_SetText(self.bountyModeDropdown, "None")
+    UIDropDownMenu_Initialize(self.bountyModeDropdown, function(dropdown, level)
+        local options = {
+            { text = "None", value = "none" },
+            { text = "One-time", value = "first_kill" },
+            { text = "Indefinitely", value = "infinite" },
+        }
+        for _, opt in ipairs(options) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = opt.text
+            info.value = opt.value
+            info.func = function(btn)
+                local target = RequireSelectedTarget()
+                if not target then return end
+                local updated, err = HitList:SetBountyMode(target.name, btn.value, Utils.PlayerName())
+                if not updated then
+                    GUnit:Print(err)
+                    return
+                end
+                UIDropDownMenu_SetText(dropdown, btn:GetText())
+                SaveTargetAndBroadcast(updated)
+            end
+            info.checked = nil
+            UIDropDownMenu_AddButton(info, level)
         end
-        local updated, err = HitList:SetBountyMode(target.name, nextMode, Utils.PlayerName())
-        if not updated then
-            GUnit:Print(err)
-            return
-        end
-        SaveTargetAndBroadcast(updated)
     end)
 
-    self.statusButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-    self.statusButton:SetSize(150, 24)
-    self.statusButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -452)
-    self.statusButton:SetText("Status: active")
-    self.statusButton:SetScript("OnClick", function()
+    -- Call Off button (active hits only, submitter only)
+    self.callOffButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    self.callOffButton:SetSize(100, 24)
+    self.callOffButton:SetPoint("TOPLEFT", frame, "TOPLEFT", 460, -504)
+    self.callOffButton:SetText("Call Off")
+    self.callOffButton:Hide()
+    self.callOffButton:SetScript("OnClick", function()
         local target = RequireSelectedTarget()
         if not target then return end
-        local nextStatus = target.hitStatus == "active" and "completed" or "active"
-        local updated, err = HitList:SetHitStatus(target.name, nextStatus, Utils.PlayerName())
+        -- Store target name for the confirmation dialog
+        UI._callOffTargetName = target.name
+        StaticPopup_Show("GUNIT_CALL_OFF_CONFIRM", target.name)
+    end)
+
+    -- Re-open button (completed/closed hits only, submitter only)
+    self.reopenButton = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
+    self.reopenButton:SetSize(100, 24)
+    self.reopenButton:SetPoint("LEFT", self.callOffButton, "RIGHT", 8, 0)
+    self.reopenButton:SetText("Re-open")
+    self.reopenButton:Hide()
+    self.reopenButton:SetScript("OnClick", function()
+        local target = RequireSelectedTarget()
+        if not target then return end
+        local updated, err = HitList:SetHitStatus(target.name, "active", Utils.PlayerName())
         if not updated then
             GUnit:Print(err)
             return
         end
         SaveTargetAndBroadcast(updated)
+        Utils.SendGuildChat(Utils.PlayerName() .. " has re-opened the hit on " .. target.name .. ".")
     end)
+
+    -- Call Off confirmation dialog
+    StaticPopupDialogs["GUNIT_CALL_OFF_CONFIRM"] = {
+        text = "Are you sure you want to call off the hit on %s?",
+        button1 = "Yes",
+        button2 = "No",
+        OnAccept = function()
+            local targetName = UI._callOffTargetName
+            if not targetName then return end
+            local target = HitList:Get(targetName)
+            if not target then return end
+
+            local hasKills = (target.killCount or 0) > 0
+            if hasKills then
+                local updated, err = HitList:SetHitStatus(targetName, "closed", Utils.PlayerName())
+                if updated then
+                    Comm:BroadcastUpsert(updated)
+                    GUnit:Print("Hit on " .. targetName .. " closed (kill history preserved).")
+                    Utils.SendGuildChat(Utils.PlayerName() .. " has closed the hit on " .. targetName .. ".")
+                end
+            else
+                HitList:Delete(targetName)
+                Comm:BroadcastDelete(targetName)
+                GUnit:Print("Hit on " .. targetName .. " has been called off.")
+                Utils.SendGuildChat(Utils.PlayerName() .. " has called off the hit on " .. targetName .. ".")
+            end
+            UI.selectedName = nil
+            UI._callOffTargetName = nil
+            GUnit:NotifyDataChanged()
+        end,
+        OnCancel = function()
+            UI._callOffTargetName = nil
+        end,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        preferredIndex = 3,
+    }
 
     local exportBtn = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
     exportBtn:SetSize(90, 22)

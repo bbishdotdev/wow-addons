@@ -71,6 +71,9 @@ local function OnPlayerLogin()
     if GUnit.Comm and GUnit.Comm.Init then
         GUnit.Comm:Init()
     end
+    if GUnit.BountyTrade and GUnit.BountyTrade.Init then
+        GUnit.BountyTrade:Init()
+    end
     if GUnit.Tracking and GUnit.Tracking.Init then
         GUnit.Tracking:Init()
     end

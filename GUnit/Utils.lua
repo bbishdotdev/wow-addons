@@ -40,7 +40,7 @@ end
 function Utils.GoldStringFromCopper(copper)
     copper = tonumber(copper) or 0
     if copper <= 0 then return "0g" end
-    return string.format("%.2fg", copper / 10000)
+    return string.format("%dg", math.floor(copper / 10000))
 end
 
 function Utils.IsSubmitter(target, playerName)
@@ -82,6 +82,12 @@ function Utils.DeserializeParts(payload)
         table.insert(out, Utils.Unescape(value))
     end
     return out
+end
+
+function Utils.SendGuildChat(message)
+    if Utils.InGuild() and SendChatMessage then
+        SendChatMessage(message, "GUILD")
+    end
 end
 
 function Utils.ZoneName()

@@ -10,9 +10,7 @@ local SIGHTING_THROTTLE_SECONDS = 60
 local sightingThrottleByName = {}
 
 local function SendGuildMessage(message)
-    if Utils.InGuild() then
-        SendChatMessage(message, "GUILD")
-    end
+    Utils.SendGuildChat(message)
 end
 
 local function LocalAlert(message)
