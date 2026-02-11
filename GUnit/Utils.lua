@@ -84,10 +84,24 @@ function Utils.DeserializeParts(payload)
     return out
 end
 
+local GUILD_MSG_PREFIX = "[G-Unit] "
+
 function Utils.SendGuildChat(message)
     if Utils.InGuild() and SendChatMessage then
-        SendChatMessage(message, "GUILD")
+        SendChatMessage(GUILD_MSG_PREFIX .. message, "GUILD")
     end
+end
+
+function Utils.TargetLabel(target)
+    if not target then return "Unknown" end
+    local name = target.name or "Unknown"
+    local parts = {}
+    if target.race and target.race ~= "" then table.insert(parts, target.race) end
+    if target.classToken and target.classToken ~= "" then table.insert(parts, target.classToken) end
+    if #parts > 0 then
+        return name .. " (" .. table.concat(parts, " ") .. ")"
+    end
+    return name
 end
 
 function Utils.ZoneName()

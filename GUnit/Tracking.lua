@@ -75,8 +75,7 @@ local function AnnounceEngageIfNeeded()
     if not hitTarget then return end
     if not HitList:ShouldAnnounceSighting(hitTarget) then return end
 
-    local playerName = Utils.PlayerName()
-    SendGuildMessage(playerName .. " has engaged " .. hitTarget.name .. ". Hit was placed by " .. hitTarget.submitter .. ".")
+    SendGuildMessage("Attempting to kill " .. Utils.TargetLabel(hitTarget) .. "! Hit was placed by " .. hitTarget.submitter .. ".")
 end
 
 local function OnCombatLogEvent()
@@ -111,8 +110,8 @@ local function OnCombatLogEvent()
     Comm:BroadcastUpsert(updatedTarget)
     GUnit:NotifyDataChanged()
 
-    SendGuildMessage(playerName .. " has killed " .. target.name .. ". Hit was placed by " .. target.submitter .. ".")
-    SendChatMessage(playerName .. " has killed " .. target.name .. " for you.", "WHISPER", nil, target.submitter)
+    SendGuildMessage(Utils.TargetLabel(target) .. " has been killed! Hit placed by " .. target.submitter .. ".")
+    SendChatMessage("[G-Unit] " .. target.name .. " has been killed for you.", "WHISPER", nil, target.submitter)
 end
 
 function Tracking:Init()

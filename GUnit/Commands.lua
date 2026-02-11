@@ -35,7 +35,12 @@ local function AddFromTargetUnit()
     HitList:UpdateValidationFromUnit(targetName, "target")
     SaveAndBroadcast(created)
     GUnit:Print("Hit added: " .. targetName .. " (one-time, no bounty).")
-    Utils.SendGuildChat(Utils.PlayerName() .. " has placed a hit on " .. targetName .. ".")
+    local openedTarget = HitList:Get(targetName)
+    local openMsg = "A hit on " .. Utils.TargetLabel(openedTarget) .. " has been opened."
+    if openedTarget and (openedTarget.bountyAmount or 0) > 0 then
+        openMsg = openMsg .. " Bounty: " .. Utils.GoldStringFromCopper(openedTarget.bountyAmount) .. "."
+    end
+    Utils.SendGuildChat(openMsg)
 end
 
 local function AddByName(name)
@@ -46,7 +51,11 @@ local function AddByName(name)
     end
     SaveAndBroadcast(target)
     GUnit:Print("Hit added: " .. target.name .. " (unverified, one-time, no bounty).")
-    Utils.SendGuildChat(Utils.PlayerName() .. " has placed a hit on " .. target.name .. ".")
+    local openMsg = "A hit on " .. Utils.TargetLabel(target) .. " has been opened."
+    if (target.bountyAmount or 0) > 0 then
+        openMsg = openMsg .. " Bounty: " .. Utils.GoldStringFromCopper(target.bountyAmount) .. "."
+    end
+    Utils.SendGuildChat(openMsg)
 end
 
 local function DoRemove(name)

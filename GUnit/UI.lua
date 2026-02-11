@@ -379,6 +379,9 @@ function UI:Init()
         local updated, err = HitList:SetBountyAmount(target.name, copper, Utils.PlayerName())
         if not updated then return end
         SaveTargetAndBroadcast(updated)
+        if copper > 0 then
+            Utils.SendGuildChat("Bounty on " .. Utils.TargetLabel(updated) .. " updated to " .. Utils.GoldStringFromCopper(copper) .. ".")
+        end
     end)
 
     -- Kill on Sight dropdown
@@ -473,7 +476,11 @@ function UI:Init()
             return
         end
         SaveTargetAndBroadcast(updated)
-        Utils.SendGuildChat(Utils.PlayerName() .. " has re-opened the hit on " .. target.name .. ".")
+        local reopenMsg = "The hit on " .. Utils.TargetLabel(updated) .. " has been re-opened."
+        if (updated.bountyAmount or 0) > 0 then
+            reopenMsg = reopenMsg .. " Bounty: " .. Utils.GoldStringFromCopper(updated.bountyAmount) .. "."
+        end
+        Utils.SendGuildChat(reopenMsg)
     end)
 
     -- Call Off confirmation dialog
@@ -493,13 +500,13 @@ function UI:Init()
                 if updated then
                     Comm:BroadcastUpsert(updated)
                     GUnit:Print("Hit on " .. targetName .. " closed (kill history preserved).")
-                    Utils.SendGuildChat(Utils.PlayerName() .. " has closed the hit on " .. targetName .. ".")
+                    Utils.SendGuildChat("The hit on " .. Utils.TargetLabel(updated) .. " has been closed.")
                 end
             else
                 HitList:Delete(targetName)
                 Comm:BroadcastDelete(targetName)
                 GUnit:Print("Hit on " .. targetName .. " has been called off.")
-                Utils.SendGuildChat(Utils.PlayerName() .. " has called off the hit on " .. targetName .. ".")
+                Utils.SendGuildChat("The hit on " .. targetName .. " has been called off.")
             end
             UI.selectedName = nil
             UI._callOffTargetName = nil
