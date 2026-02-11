@@ -790,62 +790,89 @@ function UI:Refresh()
     self:RefreshDetails()
 end
 
-local function CreateTextFrame(title, bodyText, editable)
-    local frame = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    frame:SetSize(500, 400)
-    frame:SetPoint("CENTER")
-    frame:SetMovable(true)
-    frame:EnableMouse(true)
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", frame.StartMoving)
-    frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
-    frame:SetFrameStrata("DIALOG")
-    UIComponents.StyleInset(frame)
+local optionsTabs = {}
+local optionsSelectedTab = "general"
 
-    local titleLabel = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    titleLabel:SetPoint("TOP", frame, "TOP", 0, -12)
-    titleLabel:SetText(title)
+local OPT_TEX_ACTIVE = "Interface\\OptionsFrame\\UI-OptionsFrame-ActiveTab"
+local OPT_TEX_INACTIVE = "Interface\\OptionsFrame\\UI-OptionsFrame-InActiveTab"
+local OPT_TEX_HIGHLIGHT = "Interface\\PaperDollInfoFrame\\UI-Character-Tab-Highlight"
+local OPT_TC_LEFT = { 0, 0.15625, 0, 1.0 }
+local OPT_TC_MID = { 0.15625, 0.84375, 0, 1.0 }
+local OPT_TC_RIGHT = { 0.84375, 1.0, 0, 1.0 }
+local OPT_CAP_WIDTH = 20
+local OPTION_TAB_DEFS = {
+    { key = "general", label = "General", width = 110 },
+    { key = "export", label = "Export", width = 100 },
+    { key = "import", label = "Import", width = 100 },
+}
 
-    local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
-    close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
-
-    local bottomPadding = editable and 50 or 16
-    local scroll = CreateFrame("ScrollFrame", nil, frame, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -40)
-    scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -30, bottomPadding)
-
-    local editBox = CreateFrame("EditBox", nil, scroll)
-    editBox:SetMultiLine(true)
-    editBox:SetFontObject("ChatFontNormal")
-    editBox:SetWidth(scroll:GetWidth() or 440)
-    editBox:SetAutoFocus(false)
-    editBox:SetText(bodyText or "")
-    editBox:SetCursorPosition(0)
-    scroll:SetScrollChild(editBox)
-
-    if not editable then
-        editBox:SetScript("OnTextChanged", function(self)
-            self:SetText(bodyText or "")
-            self:HighlightText()
-        end)
-    end
-
-    editBox:SetScript("OnEditFocusGained", function(self)
-        self:HighlightText()
-    end)
-
-    frame.editBox = editBox
-    return frame
+local function CreateOptionsTabTexPiece(tab, name, texture, width, anchor, relFrame, relPoint, xOff, yOff, tc)
+    local tex = tab:CreateTexture(name, "BORDER")
+    tex:SetTexture(texture)
+    tex:SetSize(width, 24)
+    tex:SetPoint(anchor, relFrame, relPoint, xOff or 0, yOff or 0)
+    tex:SetTexCoord(tc[1], tc[2], tc[3], tc[4])
+    return tex
 end
 
-local function ShowOptionsTab(self, tabName)
+local function UpdateOptionsTabStyles()
+    for _, tab in ipairs(optionsTabs) do
+        local isSelected = tab.key == optionsSelectedTab
+        if isSelected then
+            tab.activeL:Show()
+            tab.activeM:Show()
+            tab.activeR:Show()
+            tab.inactiveL:Hide()
+            tab.inactiveM:Hide()
+            tab.inactiveR:Hide()
+            tab.label:SetTextColor(1.0, 0.82, 0.0)
+        else
+            tab.activeL:Hide()
+            tab.activeM:Hide()
+            tab.activeR:Hide()
+            tab.inactiveL:Show()
+            tab.inactiveM:Show()
+            tab.inactiveR:Show()
+            tab.label:SetTextColor(0.85, 0.85, 0.85)
+        end
+    end
+end
+
+local function ShowOptionsTab(self, tabKey)
+    if not self.optionsGeneralPane or not self.optionsExportPane or not self.optionsImportPane then
+        return
+    end
+
+    optionsSelectedTab = tabKey or "general"
     self.optionsGeneralPane:Hide()
+    self.optionsExportPane:Hide()
     self.optionsImportPane:Hide()
-    if tabName == "general" then
+
+    if optionsSelectedTab == "general" then
         self.optionsGeneralPane:Show()
+    elseif optionsSelectedTab == "export" then
+        self.optionsExportPane:Show()
+        if self.optionsExportEdit then
+            local data = HitList:ExportCurrentGuild()
+            if not data or data == "" then
+                data = "No hits to export for current guild."
+            end
+            self._optionsExportStaticText = data
+            self._optionsExportSyncing = true
+            self.optionsExportEdit:SetText(data)
+            self._optionsExportSyncing = false
+            self.optionsExportEdit:HighlightText()
+            self.optionsExportEdit:SetCursorPosition(0)
+            self.optionsExportEdit:SetFocus()
+        end
     else
         self.optionsImportPane:Show()
+        if self.optionsImportEdit then
+            self.optionsImportEdit:SetFocus()
+        end
     end
+
+    UpdateOptionsTabStyles()
 end
 
 local function CreateLabeledCheckButton(parent, label, anchorTo, relPoint, x, y)
@@ -863,11 +890,12 @@ function UI:ShowOptionsModal()
         self.optionsFrame:SetFrameLevel(mainFrame and (mainFrame:GetFrameLevel() + 50) or 200)
         self.optionsFrame:Show()
         self.optionsFrame:Raise()
+        ShowOptionsTab(self, optionsSelectedTab)
         return
     end
 
     local frame = CreateFrame("Frame", "GUnitOptionsFrame", UIParent, "BackdropTemplate")
-    frame:SetSize(500, 340)
+    frame:SetSize(560, 400)
     frame:SetPoint("CENTER")
     frame:SetFrameStrata("FULLSCREEN_DIALOG")
     frame:SetFrameLevel(mainFrame and (mainFrame:GetFrameLevel() + 50) or 200)
@@ -889,24 +917,69 @@ function UI:ShowOptionsModal()
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
 
-    local tabGeneral = UIComponents.CreateButton(frame, "General", 100, 22)
-    tabGeneral:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -36)
-    local tabImport = UIComponents.CreateButton(frame, "Import/Export", 120, 22)
-    tabImport:SetPoint("LEFT", tabGeneral, "RIGHT", 8, 0)
+    local tabBar = CreateFrame("Frame", nil, frame)
+    tabBar:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -32)
+    tabBar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -10, -32)
+    tabBar:SetHeight(24)
+
+    optionsTabs = {}
+    local prevTab
+    for _, def in ipairs(OPTION_TAB_DEFS) do
+        local tab = CreateFrame("Button", nil, tabBar)
+        tab:SetSize(def.width, 24)
+        tab.key = def.key
+        tab:SetFrameLevel(frame:GetFrameLevel() + 4)
+        if prevTab then
+            tab:SetPoint("LEFT", prevTab, "RIGHT", -10, 0)
+        else
+            tab:SetPoint("TOPLEFT", tabBar, "TOPLEFT", 0, 0)
+        end
+
+        local midWidth = def.width - (OPT_CAP_WIDTH * 2)
+        tab.activeL = CreateOptionsTabTexPiece(tab, nil, OPT_TEX_ACTIVE, OPT_CAP_WIDTH, "BOTTOMLEFT", tab, "BOTTOMLEFT", 0, -3, OPT_TC_LEFT)
+        tab.activeM = CreateOptionsTabTexPiece(tab, nil, OPT_TEX_ACTIVE, midWidth, "LEFT", tab.activeL, "RIGHT", 0, 0, OPT_TC_MID)
+        tab.activeR = CreateOptionsTabTexPiece(tab, nil, OPT_TEX_ACTIVE, OPT_CAP_WIDTH, "LEFT", tab.activeM, "RIGHT", 0, 0, OPT_TC_RIGHT)
+        tab.inactiveL = CreateOptionsTabTexPiece(tab, nil, OPT_TEX_INACTIVE, OPT_CAP_WIDTH, "TOPLEFT", tab, "TOPLEFT", 0, 0, OPT_TC_LEFT)
+        tab.inactiveM = CreateOptionsTabTexPiece(tab, nil, OPT_TEX_INACTIVE, midWidth, "LEFT", tab.inactiveL, "RIGHT", 0, 0, OPT_TC_MID)
+        tab.inactiveR = CreateOptionsTabTexPiece(tab, nil, OPT_TEX_INACTIVE, OPT_CAP_WIDTH, "LEFT", tab.inactiveM, "RIGHT", 0, 0, OPT_TC_RIGHT)
+        tab.activeL:Hide()
+        tab.activeM:Hide()
+        tab.activeR:Hide()
+
+        tab:SetHighlightTexture(OPT_TEX_HIGHLIGHT, "ADD")
+        local hl = tab:GetHighlightTexture()
+        hl:ClearAllPoints()
+        hl:SetPoint("LEFT", tab, "LEFT", 10, -4)
+        hl:SetPoint("RIGHT", tab, "RIGHT", -10, -4)
+
+        tab.label = tab:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        tab.label:SetPoint("LEFT", 14, -3)
+        tab.label:SetPoint("RIGHT", -12, -3)
+        tab.label:SetText(def.label)
+        tab:SetScript("OnClick", function()
+            ShowOptionsTab(self, def.key)
+        end)
+
+        table.insert(optionsTabs, tab)
+        prevTab = tab
+    end
 
     local generalPane = CreateFrame("Frame", nil, frame)
-    generalPane:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -64)
+    generalPane:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -66)
     generalPane:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 12)
     self.optionsGeneralPane = generalPane
 
+    local exportPane = CreateFrame("Frame", nil, frame)
+    exportPane:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -66)
+    exportPane:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 12)
+    exportPane:Hide()
+    self.optionsExportPane = exportPane
+
     local importPane = CreateFrame("Frame", nil, frame)
-    importPane:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -64)
+    importPane:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, -66)
     importPane:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -12, 12)
     importPane:Hide()
     self.optionsImportPane = importPane
-
-    tabGeneral:SetScript("OnClick", function() ShowOptionsTab(self, "general") end)
-    tabImport:SetScript("OnClick", function() ShowOptionsTab(self, "import") end)
 
     local settings = GetSettings()
 
@@ -1030,13 +1103,66 @@ function UI:ShowOptionsModal()
         settings.uiGuildAnnouncements = selfBtn:GetChecked() and true or false
     end)
 
-    local exportBtn = UIComponents.CreateButton(importPane, "Open Export Window", 160, 26)
-    exportBtn:SetPoint("TOPLEFT", 8, -16)
-    exportBtn:SetScript("OnClick", function() UI:ShowExportFrame() end)
+    local exportHelp = exportPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    exportHelp:SetPoint("TOPLEFT", exportPane, "TOPLEFT", 8, -10)
+    exportHelp:SetText("Export data (Ctrl+C).")
+    exportHelp:SetTextColor(unpack(Theme.COLOR.textMuted))
 
-    local importBtn = UIComponents.CreateButton(importPane, "Open Import Window", 160, 26)
-    importBtn:SetPoint("TOPLEFT", exportBtn, "BOTTOMLEFT", 0, -10)
-    importBtn:SetScript("OnClick", function() UI:ShowImportFrame() end)
+    local exportScroll = CreateFrame("ScrollFrame", "GUnitOptionsExportScroll", exportPane, "UIPanelScrollFrameTemplate")
+    exportScroll:SetPoint("TOPLEFT", exportPane, "TOPLEFT", 6, -30)
+    exportScroll:SetPoint("BOTTOMRIGHT", exportPane, "BOTTOMRIGHT", -24, 10)
+    local exportEdit = CreateFrame("EditBox", "GUnitOptionsExportEdit", exportScroll)
+    exportEdit:SetMultiLine(true)
+    exportEdit:SetFontObject("ChatFontNormal")
+    exportEdit:SetWidth(500)
+    exportEdit:SetAutoFocus(false)
+    exportEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
+    exportEdit:SetScript("OnEditFocusGained", function(selfEdit)
+        selfEdit:HighlightText()
+    end)
+    exportEdit:SetScript("OnTextChanged", function(selfEdit)
+        if UI._optionsExportSyncing then return end
+        if UI._optionsExportStaticText and selfEdit:GetText() ~= UI._optionsExportStaticText then
+            UI._optionsExportSyncing = true
+            selfEdit:SetText(UI._optionsExportStaticText)
+            UI._optionsExportSyncing = false
+            selfEdit:HighlightText()
+        end
+    end)
+    exportScroll:SetScrollChild(exportEdit)
+    self.optionsExportEdit = exportEdit
+
+    local importHelp = importPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    importHelp:SetPoint("TOPLEFT", importPane, "TOPLEFT", 8, -10)
+    importHelp:SetText("Paste export data below and click Import.")
+    importHelp:SetTextColor(unpack(Theme.COLOR.textMuted))
+
+    local importScroll = CreateFrame("ScrollFrame", "GUnitOptionsImportScroll", importPane, "UIPanelScrollFrameTemplate")
+    importScroll:SetPoint("TOPLEFT", importPane, "TOPLEFT", 6, -30)
+    importScroll:SetPoint("BOTTOMRIGHT", importPane, "BOTTOMRIGHT", -24, 44)
+    local importEdit = CreateFrame("EditBox", "GUnitOptionsImportEdit", importScroll)
+    importEdit:SetMultiLine(true)
+    importEdit:SetFontObject("ChatFontNormal")
+    importEdit:SetWidth(500)
+    importEdit:SetAutoFocus(false)
+    importEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
+    importScroll:SetScrollChild(importEdit)
+    self.optionsImportEdit = importEdit
+
+    local importBtn = UIComponents.CreateButton(importPane, "Import", 100, 24)
+    importBtn:SetPoint("BOTTOMRIGHT", importPane, "BOTTOMRIGHT", -4, 10)
+    importBtn:SetScript("OnClick", function()
+        local text = UI.optionsImportEdit and UI.optionsImportEdit:GetText() or ""
+        local count = HitList:ImportFromString(text)
+        GUnit:Print("Imported " .. count .. " hit(s).")
+        GUnit:NotifyDataChanged()
+        if UI.optionsImportEdit then
+            UI.optionsImportEdit:SetText("")
+            UI.optionsImportEdit:SetFocus()
+        end
+    end)
+
+    ShowOptionsTab(self, optionsSelectedTab)
 end
 
 function UI:Init()
@@ -1559,34 +1685,11 @@ function UI:Toggle()
 end
 
 function UI:ShowExportFrame()
-    local data = HitList:ExportCurrentGuild()
-    if not data or data == "" then
-        GUnit:Print("No hits to export for current guild.")
-        return
-    end
-    if self.exportFrame then
-        self.exportFrame:Hide()
-        self.exportFrame = nil
-    end
-    self.exportFrame = CreateTextFrame("G-Unit Export (Ctrl+A, Ctrl+C)", data, false)
-    self.exportFrame.editBox:HighlightText()
+    self:ShowOptionsModal()
+    ShowOptionsTab(self, "export")
 end
 
 function UI:ShowImportFrame()
-    if self.importFrame then
-        self.importFrame:Hide()
-        self.importFrame = nil
-    end
-    self.importFrame = CreateTextFrame("G-Unit Import (Paste & Click Import)", "", true)
-
-    local importBtn = UIComponents.CreateButton(self.importFrame, "Import", 100, 24)
-    importBtn:SetPoint("BOTTOMRIGHT", self.importFrame, "BOTTOMRIGHT", -12, 20)
-    importBtn:SetScript("OnClick", function()
-        local text = UI.importFrame.editBox:GetText()
-        local count = HitList:ImportFromString(text)
-        GUnit:Print("Imported " .. count .. " hit(s).")
-        GUnit:NotifyDataChanged()
-        UI.importFrame:Hide()
-        UI.importFrame = nil
-    end)
+    self:ShowOptionsModal()
+    ShowOptionsTab(self, "import")
 end
