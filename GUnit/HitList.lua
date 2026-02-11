@@ -15,6 +15,40 @@ local BOUNTY_MODE_INFINITE = "infinite"
 local BOUNTY_STATUS_OPEN = "open"
 local BOUNTY_STATUS_CLAIMED = "claimed"
 
+local function SafePlayerLocationForUnit(unit)
+    if not PlayerLocation or not PlayerLocation.CreateFromUnit then
+        return nil
+    end
+    local ok, location = pcall(PlayerLocation.CreateFromUnit, PlayerLocation, unit)
+    if ok then
+        return location
+    end
+    return nil
+end
+
+local function CaptureUnitRaceMetadata(unit)
+    local location = SafePlayerLocationForUnit(unit)
+    local raceId = nil
+    local sex = nil
+
+    if location and C_PlayerInfo then
+        if C_PlayerInfo.GetRace then
+            local okRace, value = pcall(C_PlayerInfo.GetRace, location)
+            if okRace then
+                raceId = tonumber(value)
+            end
+        end
+        if C_PlayerInfo.GetSex then
+            local okSex, value = pcall(C_PlayerInfo.GetSex, location)
+            if okSex then
+                sex = tonumber(value)
+            end
+        end
+    end
+
+    return raceId, sex
+end
+
 local function CloneEntry(entry)
     local out = {}
     for k, v in pairs(entry) do
@@ -40,6 +74,8 @@ local function EnsureTarget(name, actorName, ts)
             validated = false,
             classToken = nil,
             race = nil,
+            raceId = nil,
+            sex = nil,
             faction = nil,
             killCount = 0,
             kills = {},
@@ -239,6 +275,8 @@ function HitList:UpsertFromComm(payload)
     target.classToken = payload.classToken or target.classToken
     target.race = payload.race or target.race
     target.faction = payload.faction or target.faction
+    target.raceId = tonumber(payload.raceId) or target.raceId
+    target.sex = tonumber(payload.sex) or target.sex
     target.createdAt = tonumber(payload.createdAt) or target.createdAt
     target.updatedAt = ts
     target.killCount = tonumber(payload.killCount) or target.killCount or 0
@@ -258,6 +296,7 @@ function HitList:UpdateValidationFromUnit(name, unit)
     local _, englishClass = UnitClass(unit)
     local raceName = UnitRace(unit)
     local faction = UnitFactionGroup(unit)
+    local raceId, sex = CaptureUnitRaceMetadata(unit)
     local myFaction = UnitFactionGroup("player")
 
     if faction and myFaction and faction == myFaction then
@@ -267,6 +306,8 @@ function HitList:UpdateValidationFromUnit(name, unit)
     target.validated = true
     target.classToken = englishClass
     target.race = raceName
+    target.raceId = raceId or target.raceId
+    target.sex = sex or target.sex
     target.faction = faction
     target.updatedAt = Utils.Now()
     return target
@@ -359,6 +400,13 @@ local EXPORT_FIELDS = {
     "name", "submitter", "guildName", "reason", "bountyAmount",
     "hitMode", "hitStatus", "bountyMode", "bountyStatus",
     "validated", "classToken", "race", "faction",
+    "raceId", "sex", "createdAt", "updatedAt", "killCount",
+}
+
+local LEGACY_EXPORT_FIELDS = {
+    "name", "submitter", "guildName", "reason", "bountyAmount",
+    "hitMode", "hitStatus", "bountyMode", "bountyStatus",
+    "validated", "classToken", "race", "faction",
     "createdAt", "updatedAt", "killCount",
 }
 
@@ -396,9 +444,15 @@ function HitList:ImportFromString(data)
         local trimmed = strtrim(line)
         if trimmed ~= "" then
             local fields = SplitFields(trimmed)
+            local schema = nil
             if #fields >= #EXPORT_FIELDS then
+                schema = EXPORT_FIELDS
+            elseif #fields >= #LEGACY_EXPORT_FIELDS then
+                schema = LEGACY_EXPORT_FIELDS
+            end
+            if schema then
                 local payload = {}
-                for i, key in ipairs(EXPORT_FIELDS) do
+                for i, key in ipairs(schema) do
                     payload[key] = fields[i]
                 end
                 if payload.name and payload.name ~= "" then

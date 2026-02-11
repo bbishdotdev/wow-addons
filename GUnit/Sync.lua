@@ -34,6 +34,8 @@ local function SerializeTarget(target)
         validated = target.validated and "1" or "0",
         classToken = target.classToken or "",
         race = target.race or "",
+        raceId = target.raceId or "",
+        sex = target.sex or "",
         faction = target.faction or "",
         createdAt = target.createdAt or Utils.Now(),
         updatedAt = target.updatedAt or Utils.Now(),

@@ -173,6 +173,19 @@ local function GetDisplayFaction(target)
     return GetEnemyFaction()
 end
 
+local function SetRaceTexture(texture, target)
+    local raceName = target and target.race or nil
+    local raceId = target and target.raceId or nil
+    local sex = target and target.sex or nil
+    local debugSeed = target and target.name or nil
+    if Theme.SetRaceIcon then
+        Theme.SetRaceIcon(texture, raceName, raceId, sex, debugSeed)
+        return
+    end
+    texture:SetTexture(Theme.GetRaceIcon(raceName))
+    texture:SetTexCoord(0, 1, 0, 1)
+end
+
 local function SetClassTexture(texture, classToken)
     if classToken and classToken ~= "" then
         Theme.SetClassIcon(texture, classToken)
@@ -490,9 +503,12 @@ local function UpdateGuildStatsLayout(self)
 end
 
 local function PopulateListRow(row, target)
+    if not row or not target then
+        return
+    end
     row.name = target.name
     SetClassTexture(row.classIcon, target.classToken)
-    row.raceIcon:SetTexture(Theme.GetRaceIcon(target.race))
+    SetRaceTexture(row.raceIcon, target)
     row.factionIcon:SetTexture(Theme.GetFactionIcon(GetDisplayFaction(target)))
     row.factionIcon:Hide()
 
@@ -545,18 +561,23 @@ function UI:RefreshList()
     for i, row in ipairs(rows) do
         if i <= #filteredNames then
             local target = HitList:Get(filteredNames[i])
-            row:ClearAllPoints()
-            row:SetPoint("TOPLEFT", listScrollChild, "TOPLEFT", 0, -((i - 1) * Theme.ROW_HEIGHT))
-            row:SetPoint("RIGHT", listScrollChild, "RIGHT", 0, 0)
-            PopulateListRow(row, target)
-            local bgColor
-            if self.selectedName and target and target.name == self.selectedName then
-                bgColor = SELECTED_ROW_BG
+            if target then
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", listScrollChild, "TOPLEFT", 0, -((i - 1) * Theme.ROW_HEIGHT))
+                row:SetPoint("RIGHT", listScrollChild, "RIGHT", 0, 0)
+                PopulateListRow(row, target)
+                local bgColor
+                if self.selectedName and target.name == self.selectedName then
+                    bgColor = SELECTED_ROW_BG
+                else
+                    bgColor = (i % 2 == 0) and Theme.COLOR.rowEven or Theme.COLOR.rowOdd
+                end
+                row.bg:SetColorTexture(bgColor[1], bgColor[2], bgColor[3], bgColor[4])
+                row:Show()
             else
-                bgColor = (i % 2 == 0) and Theme.COLOR.rowEven or Theme.COLOR.rowOdd
+                row.name = nil
+                row:Hide()
             end
-            row.bg:SetColorTexture(bgColor[1], bgColor[2], bgColor[3], bgColor[4])
-            row:Show()
         else
             row.name = nil
             row:Hide()
@@ -619,7 +640,7 @@ function UI:RefreshDetails()
     SetDrawerOpen(true)
 
     SetClassTexture(self.detailClassIcon, target.classToken)
-    self.detailRaceIcon:SetTexture(Theme.GetRaceIcon(target.race))
+    SetRaceTexture(self.detailRaceIcon, target)
     self.detailFactionIcon:SetTexture(Theme.GetFactionIcon(GetDisplayFaction(target)))
     self.detailNameText:SetText(Utils.ClassColorName(target.name or "Unknown", target.classToken))
     self.detailMetaText:SetText("Requested by " .. (target.submitter or "Unknown"))
@@ -1180,6 +1201,35 @@ function UI:Init()
     mainFrame:SetFrameStrata("DIALOG")
     mainFrame:SetToplevel(true)
     mainFrame.TitleText:SetText("G-Unit")
+    mainFrame:SetScript("OnHide", function()
+        UI._ignoreFocusSave = true
+        if UI.reasonEdit and UI.reasonEdit:HasFocus() then
+            UI.reasonEdit:ClearFocus()
+        end
+        if UI.bountyEdit and UI.bountyEdit:HasFocus() then
+            UI.bountyEdit:ClearFocus()
+        end
+        if UI.optionsImportEdit and UI.optionsImportEdit:HasFocus() then
+            UI.optionsImportEdit:ClearFocus()
+        end
+        if UI.optionsExportEdit and UI.optionsExportEdit:HasFocus() then
+            UI.optionsExportEdit:ClearFocus()
+        end
+        UI._ignoreFocusSave = false
+        UI._reasonEditingName = nil
+        UI.detailEditMode = false
+        UI.selectedName = nil
+        drawerIsOpen = false
+        drawerAnimating = false
+        drawerTargetWidth = 0
+        drawerWidth = 0
+        if mainFrame then
+            mainFrame:SetScript("OnUpdate", nil)
+        end
+        if detailDrawer and listPane then
+            ApplyDrawerWidth(0)
+        end
+    end)
     mainFrame:Hide()
     self.frame = mainFrame
 
