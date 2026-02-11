@@ -8,6 +8,37 @@ local function SaveAndBroadcast(target)
     GUnit:NotifyDataChanged()
 end
 
+local function ApplyDefaultsToNewHit(target)
+    if not target then return target end
+    local settings = GUnit.db and GUnit.db.settings or nil
+    if not settings then return target end
+
+    local desiredHitMode = settings.defaultHitMode or "one_time"
+    local desiredBountyGold = tonumber(settings.defaultBountyGold) or 0
+    local desiredBountyCopper = math.max(0, math.floor(desiredBountyGold * 10000 + 0.5))
+    local desiredBountyMode = settings.defaultBountyMode or "none"
+
+    local updated = target
+    local actor = Utils.PlayerName()
+
+    if desiredHitMode ~= (updated.hitMode or "one_time") then
+        local t = HitList:SetHitMode(updated.name, desiredHitMode, actor)
+        if t then updated = t end
+    end
+
+    if desiredBountyCopper ~= (updated.bountyAmount or 0) then
+        local t = HitList:SetBountyAmount(updated.name, desiredBountyCopper, actor)
+        if t then updated = t end
+    end
+
+    if desiredBountyCopper > 0 and desiredBountyMode ~= "none" then
+        local t = HitList:SetBountyMode(updated.name, desiredBountyMode, actor)
+        if t then updated = t end
+    end
+
+    return updated
+end
+
 local function AddFromTargetUnit()
     if not UnitExists("target") then
         GUnit:Print("No target selected.")
@@ -31,7 +62,11 @@ local function AddFromTargetUnit()
         return
     end
 
+    local wasExisting = HitList:Get(targetName) ~= nil
     local created = HitList:CreateOrTouch(targetName, Utils.PlayerName(), nil, Utils.Now())
+    if not wasExisting then
+        created = ApplyDefaultsToNewHit(created)
+    end
     HitList:UpdateValidationFromUnit(targetName, "target")
     SaveAndBroadcast(created)
     GUnit:Print("Hit added: " .. targetName .. " (one-time, no bounty).")
@@ -44,10 +79,15 @@ local function AddFromTargetUnit()
 end
 
 local function AddByName(name)
+    local normalized = Utils.NormalizeName(name)
+    local wasExisting = normalized and HitList:Get(normalized) ~= nil
     local target = HitList:CreateOrTouch(name, Utils.PlayerName(), nil, Utils.Now())
     if not target then
         GUnit:Print("Invalid name.")
         return
+    end
+    if not wasExisting then
+        target = ApplyDefaultsToNewHit(target)
     end
     SaveAndBroadcast(target)
     GUnit:Print("Hit added: " .. target.name .. " (unverified, one-time, no bounty).")

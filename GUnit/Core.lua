@@ -6,6 +6,16 @@ GUnit.PRINT_PREFIX = "|cffff5555[G-Unit]|r "
 local DB_DEFAULTS = {
     version = 1,
     targets = {},
+    knownAddonUsers = {},
+    settings = {
+        defaultHitMode = "one_time",
+        defaultBountyGold = 0,
+        defaultBountyMode = "none",
+        showClosedHits = true,
+        rememberDrawerState = true,
+        drawerOpen = true,
+        uiGuildAnnouncements = true,
+    },
 }
 
 local eventFrame = CreateFrame("Frame")
@@ -34,6 +44,33 @@ function GUnit:NotifyDataChanged()
     end
 end
 
+function GUnit:RegisterKnownAddonUser(name, guildName)
+    if not self.db then return end
+    local normalized = self.Utils and self.Utils.NormalizeName and self.Utils.NormalizeName(name) or nil
+    if not normalized then return end
+
+    self.db.knownAddonUsers = self.db.knownAddonUsers or {}
+    local entry = self.db.knownAddonUsers[normalized] or { name = normalized }
+    entry.guildName = guildName or (self.Utils and self.Utils.GuildName and self.Utils.GuildName()) or entry.guildName
+    entry.lastSeen = self.Utils and self.Utils.Now and self.Utils.Now() or 0
+    self.db.knownAddonUsers[normalized] = entry
+end
+
+function GUnit:KnownAddonUserCountForCurrentGuild()
+    if not self.db then return 0 end
+    local guildName = self.Utils and self.Utils.GuildName and self.Utils.GuildName() or nil
+    if not guildName then return 0 end
+
+    local users = self.db.knownAddonUsers or {}
+    local count = 0
+    for _, entry in pairs(users) do
+        if entry.guildName == guildName then
+            count = count + 1
+        end
+    end
+    return count
+end
+
 function GUnit:RegisterEvent(eventName, callback)
     if not handlersByEvent[eventName] then
         handlersByEvent[eventName] = {}
@@ -57,6 +94,7 @@ local function OnPlayerLogin()
 
     CopyDefaults(GUnitDB, DB_DEFAULTS)
     GUnit.db = GUnitDB
+    GUnit:RegisterKnownAddonUser(GUnit.Utils.PlayerName(), GUnit.Utils.GuildName())
 
     -- Migration: backfill guildName on entries created before guild-scoping
     local guildName = GUnit.Utils.GuildName()

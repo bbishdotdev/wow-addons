@@ -116,6 +116,9 @@ end
 local function OnAddonMessage(_, prefix, payload, _, sender)
     if prefix ~= PREFIX then return end
     if Utils.NormalizeName(sender) == Utils.NormalizeName(Utils.PlayerName()) then return end
+    if GUnit.RegisterKnownAddonUser then
+        GUnit:RegisterKnownAddonUser(sender, Utils.GuildName())
+    end
     local data = Comm:DecodeMap(payload)
     local action = data.action
     if action == "UPSERT" then

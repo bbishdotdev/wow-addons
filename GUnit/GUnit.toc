@@ -12,5 +12,7 @@ Comm.lua
 Sync.lua
 BountyTrade.lua
 Tracking.lua
+UITheme.lua
+UIComponents.lua
 UI.lua
 Commands.lua

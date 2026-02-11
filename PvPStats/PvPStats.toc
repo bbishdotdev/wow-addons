@@ -9,6 +9,8 @@ Utils.lua
 Core.lua
 BattlegroundTracker.lua
 UIConstants.lua
+UITheme.lua
+UIComponents.lua
 UI.lua
 BGListView.lua
 BGDetailView.lua
