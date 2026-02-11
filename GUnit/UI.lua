@@ -10,6 +10,7 @@ local UI = GUnit.UI
 
 local rows = {}
 local filteredNames = {}
+local SELECTED_ROW_BG = { 1, 0.82, 0.0, 0.2 }
 
 local mainFrame, contentArea
 local guildInfoRow
@@ -238,8 +239,12 @@ end
 local function CreateListRow(parent)
     local row = UIComponents.CreateRow(parent, 1)
     row:SetScript("OnClick", function(selfRow)
+        if UI.reasonEdit and UI.reasonEdit:HasFocus() then
+            UI.reasonEdit:ClearFocus()
+        end
         UI.selectedName = selfRow.name
         SetDrawerOpen(true)
+        UI:RefreshList()
         UI:RefreshDetails()
     end)
 
@@ -343,6 +348,45 @@ local function BuildFilteredNames()
     end
 end
 
+local function UpdateGuildStatsLayout(self)
+    if not self or not self.guildStatsGroup then return end
+    if not self.guildiesIcon or not self.guildiesValueText then return end
+    if not self.targetsIcon or not self.targetsValueText then return end
+    if not self.bountyStatIcon or not self.bountyValueText then return end
+
+    local iconWidth = 14
+    local iconTextGap = 4
+    local statGap = 20
+
+    local guildiesValueWidth = math.max(8, self.guildiesValueText:GetStringWidth() or 8)
+    local targetsValueWidth = math.max(8, self.targetsValueText:GetStringWidth() or 8)
+    local bountyValueWidth = math.max(12, self.bountyValueText:GetStringWidth() or 12)
+
+    local guildiesBlock = iconWidth + iconTextGap + guildiesValueWidth
+    local targetsBlock = iconWidth + iconTextGap + targetsValueWidth
+    local bountyBlock = iconWidth + iconTextGap + bountyValueWidth
+    local totalWidth = guildiesBlock + statGap + targetsBlock + statGap + bountyBlock
+
+    local cursor = -(totalWidth / 2)
+
+    self.guildiesIcon:ClearAllPoints()
+    self.guildiesIcon:SetPoint("LEFT", self.guildStatsGroup, "CENTER", cursor, 0)
+    self.guildiesValueText:ClearAllPoints()
+    self.guildiesValueText:SetPoint("LEFT", self.guildiesIcon, "RIGHT", iconTextGap, 0)
+    cursor = cursor + guildiesBlock + statGap
+
+    self.targetsIcon:ClearAllPoints()
+    self.targetsIcon:SetPoint("LEFT", self.guildStatsGroup, "CENTER", cursor, 0)
+    self.targetsValueText:ClearAllPoints()
+    self.targetsValueText:SetPoint("LEFT", self.targetsIcon, "RIGHT", iconTextGap, 0)
+    cursor = cursor + targetsBlock + statGap
+
+    self.bountyStatIcon:ClearAllPoints()
+    self.bountyStatIcon:SetPoint("LEFT", self.guildStatsGroup, "CENTER", cursor, 0)
+    self.bountyValueText:ClearAllPoints()
+    self.bountyValueText:SetPoint("LEFT", self.bountyStatIcon, "RIGHT", iconTextGap, 0)
+end
+
 local function PopulateListRow(row, target)
     row.name = target.name
     SetClassTexture(row.classIcon, target.classToken)
@@ -391,6 +435,7 @@ function UI:RefreshList()
         if self.bountyValueText then
             self.bountyValueText:SetText(Utils.GoldStringFromCopper(bountyTotal))
         end
+        UpdateGuildStatsLayout(self)
     end
 
     EnsureRowCount(#filteredNames)
@@ -402,7 +447,12 @@ function UI:RefreshList()
             row:SetPoint("TOPLEFT", listScrollChild, "TOPLEFT", 0, -((i - 1) * Theme.ROW_HEIGHT))
             row:SetPoint("RIGHT", listScrollChild, "RIGHT", 0, 0)
             PopulateListRow(row, target)
-            local bgColor = (i % 2 == 0) and Theme.COLOR.rowEven or Theme.COLOR.rowOdd
+            local bgColor
+            if self.selectedName and target and target.name == self.selectedName then
+                bgColor = SELECTED_ROW_BG
+            else
+                bgColor = (i % 2 == 0) and Theme.COLOR.rowEven or Theme.COLOR.rowOdd
+            end
             row.bg:SetColorTexture(bgColor[1], bgColor[2], bgColor[3], bgColor[4])
             row:Show()
         else
@@ -449,7 +499,7 @@ function UI:RefreshDetails()
     self.detailRaceIcon:SetTexture(Theme.GetRaceIcon(target.race))
     self.detailFactionIcon:SetTexture(Theme.GetFactionIcon(GetDisplayFaction(target)))
     self.detailNameText:SetText(Utils.ClassColorName(target.name or "Unknown", target.classToken))
-    self.detailMetaText:SetText((target.race or "Unknown") .. "  |  " .. GetDisplayFaction(target) .. "  |  Requested by " .. (target.submitter or "Unknown"))
+    self.detailMetaText:SetText("Requested by " .. (target.submitter or "Unknown"))
 
     self.detailStatusIcon:SetTexture(Theme.GetStatusIcon(target.hitStatus))
     self.detailStatusText:SetText(FormatStatusLabel(target.hitStatus))
@@ -885,7 +935,11 @@ function UI:Init()
     self.drawerCloseButton = UIComponents.CreateButton(drawerHeader, "X", 30, 20)
     self.drawerCloseButton:SetPoint("RIGHT", drawerHeader, "RIGHT", -6, 0)
     self.drawerCloseButton:SetScript("OnClick", function()
+        if UI.reasonEdit and UI.reasonEdit:HasFocus() then
+            UI.reasonEdit:ClearFocus()
+        end
         UI.selectedName = nil
+        UI:RefreshList()
         UI:RefreshDetails()
     end)
     self.drawerCloseButton:Hide()
@@ -985,26 +1039,36 @@ function UI:Init()
     reasonLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
 
     local reasonScroll = CreateFrame("ScrollFrame", "GUnitReasonScroll", detailDrawer, "UIPanelScrollFrameTemplate")
-    reasonScroll:SetPoint("TOPLEFT", reasonLabel, "BOTTOMLEFT", -2, -6)
-    reasonScroll:SetSize(300, 52)
+    reasonScroll:SetPoint("TOPLEFT", reasonLabel, "BOTTOMLEFT", 2, -8)
+    reasonScroll:SetSize(286, 52)
 
     local reasonBg = CreateFrame("Frame", nil, detailDrawer, "BackdropTemplate")
     UIComponents.StyleInset(reasonBg)
-    reasonBg:SetPoint("TOPLEFT", reasonScroll, "TOPLEFT", -3, 4)
-    reasonBg:SetPoint("BOTTOMRIGHT", reasonScroll, "BOTTOMRIGHT", 22, -4)
+    reasonBg:SetPoint("TOPLEFT", reasonScroll, "TOPLEFT", -2, 2)
+    reasonBg:SetPoint("BOTTOMRIGHT", reasonScroll, "BOTTOMRIGHT", 18, -2)
 
     self.reasonEdit = CreateFrame("EditBox", "GUnitReasonEdit", reasonScroll)
     self.reasonEdit:SetMultiLine(true)
     self.reasonEdit:SetFontObject("ChatFontNormal")
-    self.reasonEdit:SetWidth(270)
+    self.reasonEdit:SetPoint("TOPLEFT", reasonScroll, "TOPLEFT", 6, -6)
+    self.reasonEdit:SetWidth(262)
     self.reasonEdit:SetAutoFocus(false)
+    if self.reasonEdit.SetTextInsets then
+        self.reasonEdit:SetTextInsets(6, 6, 4, 4)
+    end
     self.reasonEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
+    self.reasonEdit:SetScript("OnEditFocusGained", function()
+        UI._reasonEditingName = UI.selectedName
+    end)
     self.reasonEdit:SetScript("OnEditFocusLost", function()
-        local target = RequireSelectedTarget()
+        local targetName = UI._reasonEditingName or UI.selectedName
+        UI._reasonEditingName = nil
+        if not targetName then return end
+        local target = HitList:Get(targetName)
         if not target then return end
         local newReason = UI.reasonEdit:GetText()
         if newReason == (target.reason or "") then return end
-        local updated = HitList:SetReason(target.name, newReason, Utils.PlayerName())
+        local updated = HitList:SetReason(targetName, newReason, Utils.PlayerName())
         if not updated then return end
         SaveTargetAndBroadcast(updated)
     end)
