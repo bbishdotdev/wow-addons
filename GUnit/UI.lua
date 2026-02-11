@@ -39,16 +39,62 @@ local function MaybeAnnounce(message)
     end
 end
 
-local function ModeLabel(target)
-    local hit = target.hitMode == "kos" and "KOS" or "One-time"
-    local bounty = target.bountyMode or "none"
-    return hit .. " | Bounty: " .. bounty
+local function HitModeValueLabel(target)
+    return target.hitMode == "kos" and "Indefinitely" or "One-time"
 end
 
 local function FormatStatusLabel(status)
     if status == "completed" then return "Done" end
     if status == "closed" then return "Closed" end
     return "Active"
+end
+
+local function BountyModeValueLabel(mode)
+    if mode == "infinite" then return "Indefinitely" end
+    if mode == "first_kill" then return "One-Time" end
+    return "None"
+end
+
+local function LatestClaimSummary(target)
+    local claims = target and target.bountyClaims or nil
+    if not claims then return nil, nil end
+
+    local latestKiller, latestTs, latestClaim = nil, -1, nil
+    for killer, claim in pairs(claims) do
+        local ts = tonumber(claim.lastClaimAt) or 0
+        if ts > latestTs then
+            latestTs = ts
+            latestKiller = killer
+            latestClaim = claim
+        end
+    end
+    if not latestKiller or not latestClaim then
+        return nil, nil
+    end
+
+    local total = latestClaim.totalCopper or 0
+    local paid = latestClaim.paidCopper or 0
+    local payState = (total - paid) > 0 and "Unpaid" or "Paid"
+    return latestKiller, payState
+end
+
+local function BountySummaryLabel(target)
+    local mode = target.bountyMode or "none"
+    local bountyAmount = target.bountyAmount or 0
+    if mode == "none" or bountyAmount <= 0 then
+        return "None"
+    end
+
+    local modeLabel = BountyModeValueLabel(mode)
+    local status = target.bountyStatus or "open"
+    if status == "claimed" then
+        local killer, payState = LatestClaimSummary(target)
+        if killer then
+            return modeLabel .. " | Claimed by " .. killer .. " | " .. payState
+        end
+        return modeLabel .. " | Claimed"
+    end
+    return modeLabel .. " | Open"
 end
 
 local function BuildClaimsText(target)
@@ -474,7 +520,24 @@ function UI:RefreshDetails()
     local target = self.selectedName and HitList:Get(self.selectedName) or nil
     if not target then
         self.detailNameText:SetText("No target selected")
-        self.detailSummaryText:SetText("Select a target from the list.")
+        self.detailModesValue:SetText("Select a target from the list.")
+        self.detailBountyStatusValue:SetText("")
+        self.detailBountyOwedLabel:Hide()
+        self.detailBountyOwedValue:Hide()
+        self.detailSummaryPanel:SetHeight(42)
+        self.reasonReadOnlyText:Hide()
+        self.hitModeReadOnlyText:Hide()
+        self.bountyAmountReadOnlyText:Hide()
+        self.bountyModeReadOnlyText:Hide()
+        self.reasonScroll:Show()
+        self.reasonEdit:Show()
+        self.hitModeLabel:Show()
+        self.bountyLabel:Show()
+        self.bountyAmountIcon:Show()
+        self.bountyModeIcon:Show()
+        self.hitModeDropdown:Show()
+        self.bountyEdit:Show()
+        self.bountyModeDropdown:Show()
         if not self.reasonEdit:HasFocus() then
             self.reasonEdit:SetText("")
         end
@@ -482,7 +545,7 @@ function UI:RefreshDetails()
             self.bountyEdit:SetText("")
         end
         UIDropDownMenu_SetText(self.hitModeDropdown, "Kill on Sight")
-        UIDropDownMenu_SetText(self.bountyModeDropdown, "Bounty Payout")
+        UIDropDownMenu_SetText(self.bountyModeDropdown, "None")
         self.callOffButton:Hide()
         self.reopenButton:Hide()
         self.detailClassPickButton:Hide()
@@ -503,17 +566,19 @@ function UI:RefreshDetails()
 
     self.detailStatusIcon:SetTexture(Theme.GetStatusIcon(target.hitStatus))
     self.detailStatusText:SetText(FormatStatusLabel(target.hitStatus))
+    local statusColor = Theme.GetStatusColor(target.hitStatus)
+    self.detailStatusText:SetTextColor(statusColor[1], statusColor[2], statusColor[3], statusColor[4])
     self.detailKillsText:SetText(tostring(target.killCount or 0) .. " kills")
-    self.detailBountyText:SetText(FormatBountyColumn(target))
+    self.detailBountyText:SetText(Utils.GoldStringFromCopper(target.bountyAmount or 0))
+    local hitModeLabel = HitModeValueLabel(target)
+    self.detailModesValue:SetText(hitModeLabel)
+    local bountyStatus = target.bountyStatus or "open"
+    self.detailBountyStatusValue:SetText(BountySummaryLabel(target))
+    self.detailBountyStatusValue:SetTextColor(0.9, 0.9, 0.9, 1)
 
-    local detail = table.concat({
-        "Modes: " .. ModeLabel(target),
-        "Hit Status: " .. FormatStatusLabel(target.hitStatus),
-        "Bounty Status: " .. (target.bountyStatus or "open"),
-        "Bounty Owed:",
-        BuildClaimsText(target),
-    }, "\n")
-    self.detailSummaryText:SetText(detail)
+    self.detailBountyOwedLabel:Hide()
+    self.detailBountyOwedValue:Hide()
+    self.detailSummaryPanel:SetHeight(42)
 
     if not self.reasonEdit:HasFocus() then
         self.reasonEdit:SetText(target.reason or "")
@@ -522,13 +587,49 @@ function UI:RefreshDetails()
         self.bountyEdit:SetText(tostring(math.floor((target.bountyAmount or 0) / 10000)))
     end
 
-    local hitModeLabel = target.hitMode == "kos" and "Indefinitely" or "One-time"
     UIDropDownMenu_SetText(self.hitModeDropdown, hitModeLabel)
 
     local bountyModeLabels = { none = "None", first_kill = "One-time", infinite = "Indefinitely" }
     UIDropDownMenu_SetText(self.bountyModeDropdown, bountyModeLabels[target.bountyMode] or "None")
 
     local isSubmitter = Utils.IsSubmitter(target)
+    if isSubmitter then
+        self.reasonReadOnlyText:Hide()
+        self.hitModeReadOnlyText:Hide()
+        self.bountyAmountReadOnlyText:Hide()
+        self.bountyModeReadOnlyText:Hide()
+
+        self.reasonScroll:Show()
+        self.reasonEdit:Show()
+        self.hitModeLabel:Show()
+        self.bountyLabel:Show()
+        self.bountyAmountIcon:Show()
+        self.bountyModeIcon:Show()
+        self.hitModeDropdown:Show()
+        self.bountyEdit:Show()
+        self.bountyModeDropdown:Show()
+    else
+        self.reasonReadOnlyText:SetText((target.reason and target.reason ~= "") and target.reason or "No reason provided.")
+        self.hitModeReadOnlyText:SetText("")
+        self.bountyAmountReadOnlyText:SetText("")
+        self.bountyModeReadOnlyText:SetText("")
+
+        self.reasonScroll:Hide()
+        self.reasonEdit:Hide()
+        self.hitModeLabel:Hide()
+        self.bountyLabel:Hide()
+        self.bountyAmountIcon:Hide()
+        self.bountyModeIcon:Hide()
+        self.hitModeDropdown:Hide()
+        self.bountyEdit:Hide()
+        self.bountyModeDropdown:Hide()
+
+        self.reasonReadOnlyText:Show()
+        self.hitModeReadOnlyText:Hide()
+        self.bountyAmountReadOnlyText:Hide()
+        self.bountyModeReadOnlyText:Hide()
+    end
+
     local isActive = target.hitStatus == "active"
     if isSubmitter and isActive then
         self.callOffButton:Show()
@@ -1026,31 +1127,63 @@ function UI:Init()
     self.detailKillsText = statStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     self.detailKillsText:SetPoint("LEFT", self.detailKillIcon, "RIGHT", 4, 0)
 
-    self.detailSummaryText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    self.detailSummaryText:SetPoint("TOPLEFT", statStrip, "BOTTOMLEFT", 0, -8)
-    self.detailSummaryText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
-    self.detailSummaryText:SetJustifyH("LEFT")
-    self.detailSummaryText:SetJustifyV("TOP")
-    self.detailSummaryText:SetText("Select a target from the list.")
+    self.detailSummaryPanel = CreateFrame("Frame", nil, detailDrawer)
+    self.detailSummaryPanel:SetPoint("TOPLEFT", statStrip, "BOTTOMLEFT", 0, -8)
+    self.detailSummaryPanel:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+    self.detailSummaryPanel:SetHeight(42)
 
-    local reasonLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    reasonLabel:SetPoint("TOPLEFT", self.detailSummaryText, "BOTTOMLEFT", 0, -12)
-    reasonLabel:SetText("Reason")
-    reasonLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+    self.detailModesLabel = UIComponents.CreateMutedText(self.detailSummaryPanel, "GameFontNormalSmall")
+    self.detailModesLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "TOPLEFT", 0, 0)
+    self.detailModesLabel:SetText("Kill on Sight")
+    self.detailModesLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
 
-    local reasonScroll = CreateFrame("ScrollFrame", "GUnitReasonScroll", detailDrawer, "UIPanelScrollFrameTemplate")
-    reasonScroll:SetPoint("TOPLEFT", reasonLabel, "BOTTOMLEFT", 2, -8)
-    reasonScroll:SetSize(286, 52)
+    self.detailModesValue = self.detailSummaryPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.detailModesValue:SetPoint("LEFT", self.detailModesLabel, "RIGHT", 8, 0)
+    self.detailModesValue:SetPoint("RIGHT", self.detailSummaryPanel, "RIGHT", 0, 0)
+    self.detailModesValue:SetJustifyH("LEFT")
+    self.detailModesValue:SetText("Select a target from the list.")
 
-    local reasonBg = CreateFrame("Frame", nil, detailDrawer, "BackdropTemplate")
-    UIComponents.StyleInset(reasonBg)
-    reasonBg:SetPoint("TOPLEFT", reasonScroll, "TOPLEFT", -2, 2)
-    reasonBg:SetPoint("BOTTOMRIGHT", reasonScroll, "BOTTOMRIGHT", 18, -2)
+    self.detailBountyStatusLabel = UIComponents.CreateMutedText(self.detailSummaryPanel, "GameFontNormalSmall")
+    self.detailBountyStatusLabel:SetPoint("TOPLEFT", self.detailModesLabel, "BOTTOMLEFT", 0, -6)
+    self.detailBountyStatusLabel:SetText("Bounty")
+    self.detailBountyStatusLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
 
-    self.reasonEdit = CreateFrame("EditBox", "GUnitReasonEdit", reasonScroll)
+    self.detailBountyStatusValue = self.detailSummaryPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.detailBountyStatusValue:SetPoint("LEFT", self.detailBountyStatusLabel, "RIGHT", 8, 0)
+    self.detailBountyStatusValue:SetPoint("RIGHT", self.detailSummaryPanel, "RIGHT", 0, 0)
+    self.detailBountyStatusValue:SetJustifyH("LEFT")
+    self.detailBountyStatusValue:SetText("")
+
+    self.detailBountyOwedLabel = UIComponents.CreateMutedText(self.detailSummaryPanel, "GameFontNormalSmall")
+    self.detailBountyOwedLabel:SetPoint("TOPLEFT", self.detailBountyStatusLabel, "BOTTOMLEFT", 0, -6)
+    self.detailBountyOwedLabel:SetText("Bounty Owed")
+    self.detailBountyOwedLabel:Hide()
+
+    self.detailBountyOwedValue = self.detailSummaryPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.detailBountyOwedValue:SetPoint("LEFT", self.detailBountyOwedLabel, "RIGHT", 8, 0)
+    self.detailBountyOwedValue:SetPoint("RIGHT", self.detailSummaryPanel, "RIGHT", 0, 0)
+    self.detailBountyOwedValue:SetJustifyH("LEFT")
+    self.detailBountyOwedValue:SetText("")
+    self.detailBountyOwedValue:Hide()
+
+    self.reasonLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.reasonLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "BOTTOMLEFT", 0, -12)
+    self.reasonLabel:SetText("Reason")
+    self.reasonLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+
+    self.reasonScroll = CreateFrame("ScrollFrame", "GUnitReasonScroll", detailDrawer, "UIPanelScrollFrameTemplate")
+    self.reasonScroll:SetPoint("TOPLEFT", self.reasonLabel, "BOTTOMLEFT", 2, -8)
+    self.reasonScroll:SetSize(286, 52)
+
+    self.reasonBg = CreateFrame("Frame", nil, detailDrawer, "BackdropTemplate")
+    UIComponents.StyleInset(self.reasonBg)
+    self.reasonBg:SetPoint("TOPLEFT", self.reasonScroll, "TOPLEFT", -2, 2)
+    self.reasonBg:SetPoint("BOTTOMRIGHT", self.reasonScroll, "BOTTOMRIGHT", 18, -2)
+
+    self.reasonEdit = CreateFrame("EditBox", "GUnitReasonEdit", self.reasonScroll)
     self.reasonEdit:SetMultiLine(true)
     self.reasonEdit:SetFontObject("ChatFontNormal")
-    self.reasonEdit:SetPoint("TOPLEFT", reasonScroll, "TOPLEFT", 6, -6)
+    self.reasonEdit:SetPoint("TOPLEFT", self.reasonScroll, "TOPLEFT", 6, -6)
     self.reasonEdit:SetWidth(262)
     self.reasonEdit:SetAutoFocus(false)
     if self.reasonEdit.SetTextInsets then
@@ -1072,42 +1205,23 @@ function UI:Init()
         if not updated then return end
         SaveTargetAndBroadcast(updated)
     end)
-    reasonScroll:SetScrollChild(self.reasonEdit)
+    self.reasonScroll:SetScrollChild(self.reasonEdit)
 
-    local bountyLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bountyLabel:SetPoint("TOPLEFT", reasonScroll, "BOTTOMLEFT", 2, -12)
-    bountyLabel:SetText("Bounty (gold)")
-    bountyLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+    self.reasonReadOnlyText = self.reasonBg:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    self.reasonReadOnlyText:SetPoint("TOPLEFT", self.reasonBg, "TOPLEFT", 8, -8)
+    self.reasonReadOnlyText:SetPoint("BOTTOMRIGHT", self.reasonBg, "BOTTOMRIGHT", -24, 8)
+    self.reasonReadOnlyText:SetJustifyH("LEFT")
+    self.reasonReadOnlyText:SetJustifyV("TOP")
+    self.reasonReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
+    self.reasonReadOnlyText:Hide()
 
-    self.bountyEdit = CreateFrame("EditBox", nil, detailDrawer, "InputBoxTemplate")
-    self.bountyEdit:SetSize(110, 24)
-    self.bountyEdit:SetPoint("TOPLEFT", bountyLabel, "BOTTOMLEFT", 0, -8)
-    self.bountyEdit:SetAutoFocus(false)
-    self.bountyEdit:SetNumeric(true)
-    self.bountyEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
-    self.bountyEdit:SetScript("OnEnterPressed", function(eb) eb:ClearFocus() end)
-    self.bountyEdit:SetScript("OnEditFocusLost", function()
-        local target = RequireSelectedTarget()
-        if not target then return end
-        local gold = tonumber(UI.bountyEdit:GetText())
-        if not gold or gold < 0 then return end
-        local copper = gold * 10000
-        if copper == (target.bountyAmount or 0) then return end
-        local updated = HitList:SetBountyAmount(target.name, copper, Utils.PlayerName())
-        if not updated then return end
-        SaveTargetAndBroadcast(updated)
-        if copper > 0 then
-            MaybeAnnounce("Bounty on " .. Utils.TargetLabel(updated) .. " updated to " .. Utils.GoldStringFromCopper(copper) .. ".")
-        end
-    end)
-
-    local hitModeLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    hitModeLabel:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", 0, -12)
-    hitModeLabel:SetText("Kill on Sight")
-    hitModeLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+    self.hitModeLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.hitModeLabel:SetPoint("TOPLEFT", self.reasonScroll, "BOTTOMLEFT", 2, -12)
+    self.hitModeLabel:SetText("Kill on Sight")
+    self.hitModeLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
 
     self.hitModeDropdown = CreateFrame("Frame", "GUnitHitModeDropdown", detailDrawer, "UIDropDownMenuTemplate")
-    self.hitModeDropdown:SetPoint("TOPLEFT", hitModeLabel, "BOTTOMLEFT", -16, -2)
+    self.hitModeDropdown:SetPoint("TOPLEFT", self.hitModeLabel, "BOTTOMLEFT", -16, -2)
     UIDropDownMenu_SetWidth(self.hitModeDropdown, 110)
     UIDropDownMenu_Initialize(self.hitModeDropdown, function(dropdown, level)
         local options = {
@@ -1133,13 +1247,49 @@ function UI:Init()
         end
     end)
 
-    local bountyModeLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bountyModeLabel:SetPoint("TOPLEFT", self.hitModeDropdown, "BOTTOMLEFT", 16, -12)
-    bountyModeLabel:SetText("Bounty Payout")
-    bountyModeLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+    self.hitModeReadOnlyText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    self.hitModeReadOnlyText:SetPoint("LEFT", self.hitModeDropdown, "LEFT", 16, 0)
+    self.hitModeReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
+    self.hitModeReadOnlyText:Hide()
+
+    self.bountyLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.bountyLabel:SetPoint("TOPLEFT", self.hitModeDropdown, "BOTTOMLEFT", 16, -12)
+    self.bountyLabel:SetText("Bounty Details")
+    self.bountyLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+
+    self.bountyEdit = CreateFrame("EditBox", nil, detailDrawer, "InputBoxTemplate")
+    self.bountyEdit:SetSize(110, 24)
+    self.bountyEdit:SetPoint("TOPLEFT", self.bountyLabel, "BOTTOMLEFT", 0, -8)
+    self.bountyEdit:SetAutoFocus(false)
+    self.bountyEdit:SetNumeric(true)
+    self.bountyEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
+    self.bountyEdit:SetScript("OnEnterPressed", function(eb) eb:ClearFocus() end)
+    self.bountyEdit:SetScript("OnEditFocusLost", function()
+        local target = RequireSelectedTarget()
+        if not target then return end
+        local gold = tonumber(UI.bountyEdit:GetText())
+        if not gold or gold < 0 then return end
+        local copper = gold * 10000
+        if copper == (target.bountyAmount or 0) then return end
+        local updated = HitList:SetBountyAmount(target.name, copper, Utils.PlayerName())
+        if not updated then return end
+        SaveTargetAndBroadcast(updated)
+        if copper > 0 then
+            MaybeAnnounce("Bounty on " .. Utils.TargetLabel(updated) .. " updated to " .. Utils.GoldStringFromCopper(copper) .. ".")
+        end
+    end)
+
+    self.bountyAmountIcon = UIComponents.CreateIcon(detailDrawer, 16)
+    self.bountyAmountIcon:SetTexture(Theme.ICON.bounty)
+    self.bountyAmountIcon:SetPoint("LEFT", self.bountyEdit, "RIGHT", 8, 0)
+
+    self.bountyAmountReadOnlyText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    self.bountyAmountReadOnlyText:SetPoint("LEFT", self.bountyEdit, "LEFT", 6, 0)
+    self.bountyAmountReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
+    self.bountyAmountReadOnlyText:Hide()
 
     self.bountyModeDropdown = CreateFrame("Frame", "GUnitBountyModeDropdown", detailDrawer, "UIDropDownMenuTemplate")
-    self.bountyModeDropdown:SetPoint("TOPLEFT", bountyModeLabel, "BOTTOMLEFT", -16, -2)
+    self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -16, -10)
     UIDropDownMenu_SetWidth(self.bountyModeDropdown, 110)
     UIDropDownMenu_Initialize(self.bountyModeDropdown, function(dropdown, level)
         local options = {
@@ -1165,6 +1315,15 @@ function UI:Init()
             UIDropDownMenu_AddButton(info, level)
         end
     end)
+
+    self.bountyModeIcon = UIComponents.CreateIcon(detailDrawer, 16)
+    self.bountyModeIcon:SetTexture("Interface\\Icons\\INV_Misc_PocketWatch_01")
+    self.bountyModeIcon:SetPoint("LEFT", self.bountyModeDropdown, "RIGHT", -8, 2)
+
+    self.bountyModeReadOnlyText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    self.bountyModeReadOnlyText:SetPoint("LEFT", self.bountyModeDropdown, "LEFT", 16, 0)
+    self.bountyModeReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
+    self.bountyModeReadOnlyText:Hide()
 
     self.callOffButton = UIComponents.CreateButton(detailDrawer, "Call Off", 100, 24)
     self.callOffButton:SetPoint("BOTTOMLEFT", detailDrawer, "BOTTOMLEFT", 10, 10)
