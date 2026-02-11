@@ -235,6 +235,43 @@ local function RequireSelectedTarget()
     return target
 end
 
+local function CommitEditModeFields()
+    local target = RequireSelectedTarget()
+    if not target then return end
+    if not Utils.IsSubmitter(target) then return end
+
+    local latest = target
+    local changed = false
+
+    local newReason = (UI.reasonEdit and UI.reasonEdit:GetText()) or ""
+    if newReason ~= (latest.reason or "") then
+        local updated = HitList:SetReason(latest.name, newReason, Utils.PlayerName())
+        if updated then
+            latest = updated
+            changed = true
+        end
+    end
+
+    local gold = UI.bountyEdit and tonumber(UI.bountyEdit:GetText()) or nil
+    if gold and gold >= 0 then
+        local copper = gold * 10000
+        if copper ~= (latest.bountyAmount or 0) then
+            local updated = HitList:SetBountyAmount(latest.name, copper, Utils.PlayerName())
+            if updated then
+                latest = updated
+                changed = true
+                if copper > 0 then
+                    MaybeAnnounce("Bounty on " .. Utils.TargetLabel(updated) .. " updated to " .. Utils.GoldStringFromCopper(copper) .. ".")
+                end
+            end
+        end
+    end
+
+    if changed then
+        SaveTargetAndBroadcast(latest)
+    end
+end
+
 local function UpdateListPaneAnchor()
     listPane:ClearAllPoints()
     local topAnchor = guildInfoRow and guildInfoRow or contentArea
@@ -306,6 +343,7 @@ local function CreateListRow(parent)
         if UI.reasonEdit and UI.reasonEdit:HasFocus() then
             UI.reasonEdit:ClearFocus()
         end
+        UI.detailEditMode = false
         UI.selectedName = selfRow.name
         SetDrawerOpen(true)
         UI:RefreshList()
@@ -537,16 +575,19 @@ end
 function UI:RefreshDetails()
     local target = self.selectedName and HitList:Get(self.selectedName) or nil
     if not target then
+        self.detailEditMode = false
         self.detailNameText:SetText("No target selected")
         self.detailModesValue:SetText("Select a target from the list.")
         self.detailBountyStatusValue:SetText("")
         self.detailBountyOwedLabel:Hide()
         self.detailBountyOwedValue:Hide()
         self.detailSummaryPanel:SetHeight(30)
+        self.reasonReadOnlyLabel:Hide()
         self.reasonReadOnlyText:Hide()
         self.hitModeReadOnlyText:Hide()
         self.bountyAmountReadOnlyText:Hide()
         self.bountyModeReadOnlyText:Hide()
+        self.reasonBg:Show()
         self.reasonScroll:Show()
         self.reasonEdit:Show()
         self.hitModeLabel:Show()
@@ -566,6 +607,7 @@ function UI:RefreshDetails()
         UIDropDownMenu_SetText(self.bountyModeDropdown, "None")
         self.callOffButton:Hide()
         self.reopenButton:Hide()
+        self.detailEditButton:Hide()
         self.detailClassPickButton:Hide()
         self.detailRacePickButton:Hide()
         self.drawerCloseButton:Hide()
@@ -610,29 +652,71 @@ function UI:RefreshDetails()
     UIDropDownMenu_SetText(self.bountyModeDropdown, bountyModeLabels[target.bountyMode] or "None")
 
     local isSubmitter = Utils.IsSubmitter(target)
-    if isSubmitter then
-        self.reasonReadOnlyText:Hide()
-        self.hitModeReadOnlyText:Hide()
-        self.bountyAmountReadOnlyText:Hide()
-        self.bountyModeReadOnlyText:Hide()
+    if not isSubmitter then
+        self.detailEditMode = false
+    end
+    local editMode = isSubmitter and self.detailEditMode == true
 
-        self.reasonScroll:Show()
-        self.reasonEdit:Show()
+    if isSubmitter then
+        self.detailEditButton:Show()
+        self.detailEditButton:SetText(editMode and "Save" or "Edit")
+    else
+        self.detailEditButton:Hide()
+    end
+
+    self.reasonReadOnlyText:SetText((target.reason and target.reason ~= "") and target.reason or "No reason provided.")
+
+    if editMode then
+        self.detailSummaryPanel:Show()
+        self.reasonReadOnlyLabel:Hide()
+        self.reasonReadOnlyText:Hide()
+        self.reasonBg:Show()
+        self.detailModesLabel:Hide()
+        self.detailModesValue:Hide()
+        self.detailBountyStatusLabel:Hide()
+        self.detailBountyStatusValue:Hide()
+
+        -- Edit layout: explicit top-down anchors to avoid circular dependencies.
+        self.hitModeLabel:ClearAllPoints()
+        self.hitModeLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "TOPLEFT", 0, 0)
+        self.hitModeDropdown:ClearAllPoints()
+        self.hitModeDropdown:SetPoint("TOPLEFT", self.hitModeLabel, "BOTTOMLEFT", -16, -2)
+
+        self.bountyLabel:ClearAllPoints()
+        self.bountyLabel:SetPoint("TOPLEFT", self.hitModeDropdown, "BOTTOMLEFT", 16, -12)
+        self.bountyAmountIcon:ClearAllPoints()
+        self.bountyAmountIcon:SetPoint("LEFT", self.bountyLabel, "LEFT", 2, -20)
+        self.bountyEdit:ClearAllPoints()
+        self.bountyEdit:SetPoint("LEFT", self.bountyAmountIcon, "RIGHT", 12, 0)
+        self.bountyModeIcon:ClearAllPoints()
+        self.bountyModeIcon:SetPoint("LEFT", self.bountyAmountIcon, "LEFT", 0, -34)
+        self.bountyModeDropdown:ClearAllPoints()
+        self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -20, -10)
+
         self.hitModeLabel:Show()
         self.bountyLabel:Show()
+        self.reasonLabel:Show()
         self.bountyAmountIcon:Show()
         self.bountyModeIcon:Show()
         self.hitModeDropdown:Show()
         self.bountyEdit:Show()
         self.bountyModeDropdown:Show()
-    else
-        self.reasonReadOnlyText:SetText((target.reason and target.reason ~= "") and target.reason or "No reason provided.")
-        self.hitModeReadOnlyText:SetText("")
-        self.bountyAmountReadOnlyText:SetText("")
-        self.bountyModeReadOnlyText:SetText("")
+        self.reasonScroll:Show()
+        self.reasonEdit:Show()
 
-        self.reasonScroll:Hide()
-        self.reasonEdit:Hide()
+        self.reasonLabel:ClearAllPoints()
+        self.reasonLabel:SetPoint("TOPLEFT", self.bountyLabel, "BOTTOMLEFT", 0, -66)
+        self.reasonScroll:ClearAllPoints()
+        self.reasonScroll:SetPoint("TOPLEFT", self.reasonLabel, "BOTTOMLEFT", 0, -6)
+    else
+        self.detailSummaryPanel:Show()
+        self.reasonReadOnlyLabel:Show()
+        self.detailModesLabel:Show()
+        self.detailModesValue:Show()
+        self.detailBountyStatusLabel:Show()
+        self.detailBountyStatusValue:Show()
+        self.reasonReadOnlyText:Show()
+
         self.hitModeLabel:Hide()
         self.bountyLabel:Hide()
         self.bountyAmountIcon:Hide()
@@ -640,11 +724,38 @@ function UI:RefreshDetails()
         self.hitModeDropdown:Hide()
         self.bountyEdit:Hide()
         self.bountyModeDropdown:Hide()
+        self.reasonBg:Hide()
+        self.reasonScroll:Hide()
+        self.reasonEdit:Hide()
+        self.reasonLabel:Hide()
 
+        -- Restore readonly anchors.
+        self.hitModeLabel:ClearAllPoints()
+        self.hitModeLabel:SetPoint("TOPLEFT", self.reasonScroll, "BOTTOMLEFT", 2, -12)
+        self.hitModeDropdown:ClearAllPoints()
+        self.hitModeDropdown:SetPoint("TOPLEFT", self.hitModeLabel, "BOTTOMLEFT", -16, -2)
+        self.bountyLabel:ClearAllPoints()
+        self.bountyLabel:SetPoint("TOPLEFT", self.hitModeDropdown, "BOTTOMLEFT", 16, -12)
+        self.bountyAmountIcon:ClearAllPoints()
+        self.bountyAmountIcon:SetPoint("LEFT", self.bountyLabel, "LEFT", 2, -20)
+        self.bountyEdit:ClearAllPoints()
+        self.bountyEdit:SetPoint("LEFT", self.bountyAmountIcon, "RIGHT", 12, 0)
+        self.bountyModeIcon:ClearAllPoints()
+        self.bountyModeIcon:SetPoint("LEFT", self.bountyAmountIcon, "LEFT", 0, -34)
+        self.bountyModeDropdown:ClearAllPoints()
+        self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -20, -10)
+
+        self.reasonReadOnlyLabel:ClearAllPoints()
+        self.reasonReadOnlyLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "BOTTOMLEFT", 0, -2)
+
+        -- Ensure readonly reason section is always restored after Save.
+        self.reasonReadOnlyLabel:Show()
+        self.reasonReadOnlyLabel:SetAlpha(1)
         self.reasonReadOnlyText:Show()
-        self.hitModeReadOnlyText:Hide()
-        self.bountyAmountReadOnlyText:Hide()
-        self.bountyModeReadOnlyText:Hide()
+        self.reasonReadOnlyText:SetAlpha(1)
+        self.reasonReadOnlyText:ClearAllPoints()
+        self.reasonReadOnlyText:SetPoint("TOPLEFT", self.reasonReadOnlyLabel, "BOTTOMLEFT", 0, -6)
+        self.reasonReadOnlyText:SetPoint("RIGHT", detailDrawer, "RIGHT", -24, 0)
     end
 
     local isActive = target.hitStatus == "active"
@@ -1114,8 +1225,32 @@ function UI:Init()
 
     self.detailNameText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     self.detailNameText:SetPoint("LEFT", self.detailFactionIcon, "RIGHT", 8, 0)
-    self.detailNameText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+    self.detailNameText:SetPoint("RIGHT", detailDrawer, "RIGHT", -70, 0)
     self.detailNameText:SetJustifyH("LEFT")
+
+    self.detailEditButton = UIComponents.CreateButton(detailDrawer, "Edit", 52, 20)
+    self.detailEditButton:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+    self.detailEditButton:SetPoint("TOP", self.detailNameText, "TOP", 0, 2)
+    self.detailEditButton:Hide()
+    self.detailEditButton:SetScript("OnClick", function()
+        local leavingEditMode = UI.detailEditMode == true
+        if leavingEditMode then
+            CommitEditModeFields()
+            UI.detailEditMode = false
+        end
+        UI._ignoreFocusSave = true
+        if UI.reasonEdit and UI.reasonEdit:HasFocus() then
+            UI.reasonEdit:ClearFocus()
+        end
+        if UI.bountyEdit and UI.bountyEdit:HasFocus() then
+            UI.bountyEdit:ClearFocus()
+        end
+        UI._ignoreFocusSave = false
+        if not leavingEditMode then
+            UI.detailEditMode = true
+        end
+        UI:RefreshDetails()
+    end)
 
     self.detailMetaText = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
     self.detailMetaText:SetPoint("TOPLEFT", self.detailClassIcon, "BOTTOMLEFT", 0, -4)
@@ -1188,6 +1323,12 @@ function UI:Init()
     self.reasonLabel:SetText("Reason")
     self.reasonLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
 
+    self.reasonReadOnlyLabel = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
+    self.reasonReadOnlyLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "BOTTOMLEFT", 0, -2)
+    self.reasonReadOnlyLabel:SetText("Reason")
+    self.reasonReadOnlyLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+    self.reasonReadOnlyLabel:Hide()
+
     self.reasonScroll = CreateFrame("ScrollFrame", "GUnitReasonScroll", detailDrawer, "UIPanelScrollFrameTemplate")
     self.reasonScroll:SetPoint("TOPLEFT", self.reasonLabel, "BOTTOMLEFT", 0, -6)
     self.reasonScroll:SetSize(286, 52)
@@ -1211,28 +1352,21 @@ function UI:Init()
         UI._reasonEditingName = UI.selectedName
     end)
     self.reasonEdit:SetScript("OnEditFocusLost", function()
-        local targetName = UI._reasonEditingName or UI.selectedName
         UI._reasonEditingName = nil
-        if not targetName then return end
-        local target = HitList:Get(targetName)
-        if not target then return end
-        local newReason = UI.reasonEdit:GetText()
-        if newReason == (target.reason or "") then return end
-        local updated = HitList:SetReason(targetName, newReason, Utils.PlayerName())
-        if not updated then return end
-        SaveTargetAndBroadcast(updated)
+        if UI._ignoreFocusSave then return end
+        -- Explicit save button owns persistence in edit mode.
     end)
     self.reasonScroll:SetScrollChild(self.reasonEdit)
 
-    self.reasonReadOnlyText = self.reasonBg:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    self.reasonReadOnlyText:SetPoint("TOPLEFT", self.reasonBg, "TOPLEFT", 8, -8)
-    self.reasonReadOnlyText:SetPoint("BOTTOMRIGHT", self.reasonBg, "BOTTOMRIGHT", -24, 8)
+    self.reasonReadOnlyText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.reasonReadOnlyText:SetPoint("TOPLEFT", self.reasonReadOnlyLabel, "BOTTOMLEFT", 0, -6)
+    self.reasonReadOnlyText:SetPoint("RIGHT", detailDrawer, "RIGHT", -24, 0)
     self.reasonReadOnlyText:SetJustifyH("LEFT")
     self.reasonReadOnlyText:SetJustifyV("TOP")
     self.reasonReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
     self.reasonReadOnlyText:Hide()
 
-    self.hitModeLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.hitModeLabel = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
     self.hitModeLabel:SetPoint("TOPLEFT", self.reasonScroll, "BOTTOMLEFT", 2, -12)
     self.hitModeLabel:SetText("Kill on Sight")
     self.hitModeLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
@@ -1269,7 +1403,7 @@ function UI:Init()
     self.hitModeReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
     self.hitModeReadOnlyText:Hide()
 
-    self.bountyLabel = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.bountyLabel = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
     self.bountyLabel:SetPoint("TOPLEFT", self.hitModeDropdown, "BOTTOMLEFT", 16, -12)
     self.bountyLabel:SetText("Bounty Details")
     self.bountyLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
@@ -1282,18 +1416,8 @@ function UI:Init()
     self.bountyEdit:SetScript("OnEscapePressed", function(eb) eb:ClearFocus() end)
     self.bountyEdit:SetScript("OnEnterPressed", function(eb) eb:ClearFocus() end)
     self.bountyEdit:SetScript("OnEditFocusLost", function()
-        local target = RequireSelectedTarget()
-        if not target then return end
-        local gold = tonumber(UI.bountyEdit:GetText())
-        if not gold or gold < 0 then return end
-        local copper = gold * 10000
-        if copper == (target.bountyAmount or 0) then return end
-        local updated = HitList:SetBountyAmount(target.name, copper, Utils.PlayerName())
-        if not updated then return end
-        SaveTargetAndBroadcast(updated)
-        if copper > 0 then
-            MaybeAnnounce("Bounty on " .. Utils.TargetLabel(updated) .. " updated to " .. Utils.GoldStringFromCopper(copper) .. ".")
-        end
+        if UI._ignoreFocusSave then return end
+        -- Explicit save button owns persistence in edit mode.
     end)
 
     self.bountyAmountIcon = UIComponents.CreateIcon(detailDrawer, 16)
