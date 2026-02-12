@@ -108,6 +108,113 @@ function Utils.ZoneName()
     return GetRealZoneText() or "Unknown Zone"
 end
 
+function Utils.SubZoneName()
+    local subzone = GetSubZoneText and GetSubZoneText() or nil
+    if subzone and subzone ~= "" then
+        return subzone
+    end
+    return Utils.ZoneName()
+end
+
+local function SafeMapIdForUnit(unit)
+    if not C_Map or not C_Map.GetBestMapForUnit then
+        return nil
+    end
+    local ok, mapId = pcall(C_Map.GetBestMapForUnit, unit)
+    if not ok then
+        return nil
+    end
+    return tonumber(mapId)
+end
+
+local function SafeUnitPosition(mapId, unit)
+    if not mapId or not C_Map or not C_Map.GetPlayerMapPosition then
+        return nil, nil
+    end
+    local ok, position = pcall(C_Map.GetPlayerMapPosition, mapId, unit)
+    if not ok or not position then
+        return nil, nil
+    end
+
+    local x = position.x
+    local y = position.y
+    if type(position.GetXY) == "function" then
+        local okXY, px, py = pcall(position.GetXY, position)
+        if okXY then
+            x = px
+            y = py
+        end
+    end
+
+    x = tonumber(x)
+    y = tonumber(y)
+    if not x or not y then
+        return nil, nil
+    end
+    if x < 0 or x > 1 or y < 0 or y > 1 then
+        return nil, nil
+    end
+    return x, y
+end
+
+function Utils.BuildLocationPayload(options)
+    options = options or {}
+    local unit = options.unit or "player"
+    local source = options.source or "unknown"
+    local approximate = options.approximate == true
+    local seenAt = tonumber(options.seenAt) or Utils.Now()
+    local confidenceYards = tonumber(options.confidenceYards)
+    local fallbackToPlayer = options.fallbackToPlayer ~= false
+
+    local zone = Utils.ZoneName()
+    local subzone = Utils.SubZoneName()
+    local mapId = SafeMapIdForUnit(unit)
+    local x, y = SafeUnitPosition(mapId, unit)
+
+    if fallbackToPlayer and (not mapId or x == nil or y == nil) then
+        local playerMapId = SafeMapIdForUnit("player")
+        if playerMapId then
+            mapId = playerMapId
+            x, y = SafeUnitPosition(playerMapId, "player")
+            approximate = true
+        end
+    end
+
+    return {
+        zone = zone or "Unknown Zone",
+        subzone = (subzone and subzone ~= "") and subzone or (zone or "Unknown Zone"),
+        mapId = mapId,
+        x = x,
+        y = y,
+        seenAt = seenAt,
+        source = source,
+        approximate = approximate,
+        confidenceYards = confidenceYards,
+    }
+end
+
+function Utils.FormatLocation(location)
+    if type(location) ~= "table" then
+        return "Unknown location"
+    end
+    local zone = location.zone or "Unknown Zone"
+    local subzone = location.subzone
+    local label = zone
+    if subzone and subzone ~= "" and subzone ~= zone then
+        label = subzone .. ", " .. zone
+    end
+
+    local x = tonumber(location.x)
+    local y = tonumber(location.y)
+    if x and y then
+        label = string.format("%s (%.1f, %.1f)", label, x * 100, y * 100)
+    end
+    if location.approximate then
+        label = "~" .. label
+    end
+    return label
+end
+
 function Utils.Now()
     return time()
 end

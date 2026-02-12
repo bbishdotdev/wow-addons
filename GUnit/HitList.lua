@@ -91,6 +91,50 @@ local function CloneEntry(entry)
     return out
 end
 
+local function NormalizeLocationPayload(location, defaultSource)
+    if type(location) ~= "table" then
+        return nil
+    end
+
+    local zone = location.zone
+    if not zone or zone == "" then
+        zone = Utils.ZoneName()
+    end
+    if not zone or zone == "" then
+        zone = "Unknown Zone"
+    end
+
+    local subzone = location.subzone
+    if not subzone or subzone == "" then
+        subzone = zone
+    end
+
+    local mapId = tonumber(location.mapId)
+    local x = tonumber(location.x)
+    local y = tonumber(location.y)
+    if x and (x < 0 or x > 1) then x = nil end
+    if y and (y < 0 or y > 1) then y = nil end
+
+    local seenAt = tonumber(location.seenAt) or Utils.Now()
+    local confidenceYards = tonumber(location.confidenceYards)
+    local source = location.source
+    if not source or source == "" then
+        source = defaultSource or "unknown"
+    end
+
+    return {
+        zone = zone,
+        subzone = subzone,
+        mapId = mapId,
+        x = x,
+        y = y,
+        seenAt = seenAt,
+        source = source,
+        approximate = location.approximate == true or location.approximate == "1",
+        confidenceYards = confidenceYards,
+    }
+end
+
 local function EnsureTarget(name, actorName, ts)
     if not GUnit.db.targets[name] then
         GUnit.db.targets[name] = {
@@ -111,6 +155,7 @@ local function EnsureTarget(name, actorName, ts)
             raceId = nil,
             sex = nil,
             faction = nil,
+            lastKnownLocation = nil,
             killCount = 0,
             kills = {},
             bountyClaims = {},
@@ -311,6 +356,23 @@ function HitList:UpsertFromComm(payload)
     target.faction = payload.faction or target.faction
     target.raceId = tonumber(payload.raceId) or target.raceId or InferRaceIdFromRaceName(target.race)
     target.sex = tonumber(payload.sex) or target.sex or 0
+    local incomingLocation = NormalizeLocationPayload({
+        zone = payload.lastSeenZone,
+        subzone = payload.lastSeenSubzone,
+        mapId = payload.lastSeenMapId,
+        x = payload.lastSeenX,
+        y = payload.lastSeenY,
+        seenAt = payload.lastSeenAt,
+        source = payload.lastSeenSource,
+        approximate = payload.lastSeenApproximate,
+        confidenceYards = payload.lastSeenConfidenceYards,
+    }, "comm")
+    if incomingLocation then
+        local currentSeenAt = target.lastKnownLocation and tonumber(target.lastKnownLocation.seenAt) or 0
+        if incomingLocation.seenAt >= currentSeenAt then
+            target.lastKnownLocation = incomingLocation
+        end
+    end
     target.createdAt = tonumber(payload.createdAt) or target.createdAt
     target.updatedAt = ts
     target.killCount = tonumber(payload.killCount) or target.killCount or 0
@@ -343,11 +405,31 @@ function HitList:UpdateValidationFromUnit(name, unit)
     target.raceId = raceId or target.raceId
     target.sex = sex or target.sex
     target.faction = faction
+    target.lastKnownLocation = NormalizeLocationPayload(Utils.BuildLocationPayload({
+        unit = unit,
+        source = "unit",
+        approximate = false,
+        fallbackToPlayer = true,
+    }), "unit") or target.lastKnownLocation
     target.updatedAt = Utils.Now()
     return target
 end
 
-function HitList:ApplyKill(targetName, killerName, zone, ts)
+function HitList:UpdateLastKnownLocation(name, location)
+    local target = self:Get(name)
+    if not target then return nil, "Target not found." end
+    local normalized = NormalizeLocationPayload(location)
+    if not normalized then return nil, "Invalid location payload." end
+
+    local currentSeenAt = target.lastKnownLocation and tonumber(target.lastKnownLocation.seenAt) or 0
+    if normalized.seenAt >= currentSeenAt then
+        target.lastKnownLocation = normalized
+    end
+    target.updatedAt = Utils.Now()
+    return target
+end
+
+function HitList:ApplyKill(targetName, killerName, location, ts)
     local target = self:Get(targetName)
     if not target then
         GUnit:Print("[DEBUG] ApplyKill: target not found for '" .. tostring(targetName) .. "'")
@@ -359,15 +441,30 @@ function HitList:ApplyKill(targetName, killerName, zone, ts)
 
     local prevCount = target.killCount or 0
     target.kills = target.kills or {}
+    local resolvedLocation = nil
+    if type(location) == "table" then
+        resolvedLocation = NormalizeLocationPayload(location, "party_kill")
+    else
+        resolvedLocation = NormalizeLocationPayload({
+            zone = location or Utils.ZoneName(),
+            subzone = Utils.SubZoneName(),
+            seenAt = now,
+            source = "party_kill",
+            approximate = false,
+        }, "party_kill")
+    end
+
     table.insert(target.kills, {
         killer = killer,
         ts = now,
-        zone = zone or Utils.ZoneName(),
+        zone = (resolvedLocation and resolvedLocation.zone) or Utils.ZoneName(),
+        location = resolvedLocation,
         submitterAtTime = target.submitter,
         proof = {
             auto = true,
             ts = now,
-            zone = zone or Utils.ZoneName(),
+            zone = (resolvedLocation and resolvedLocation.zone) or Utils.ZoneName(),
+            location = resolvedLocation,
         },
     })
     target.killCount = prevCount + 1
@@ -395,6 +492,12 @@ function HitList:ApplyKill(targetName, killerName, zone, ts)
         end
     end
 
+    if resolvedLocation then
+        local currentSeenAt = target.lastKnownLocation and tonumber(target.lastKnownLocation.seenAt) or 0
+        if resolvedLocation.seenAt >= currentSeenAt then
+            target.lastKnownLocation = resolvedLocation
+        end
+    end
     target.updatedAt = now
     return CloneEntry(target)
 end
@@ -435,6 +538,8 @@ local EXPORT_FIELDS = {
     "hitMode", "hitStatus", "bountyMode", "bountyStatus",
     "validated", "classToken", "race", "faction",
     "raceId", "sex", "createdAt", "updatedAt", "killCount",
+    "lastSeenZone", "lastSeenSubzone", "lastSeenMapId", "lastSeenX", "lastSeenY",
+    "lastSeenAt", "lastSeenSource", "lastSeenApproximate", "lastSeenConfidenceYards",
 }
 
 local LEGACY_EXPORT_FIELDS = {
@@ -457,6 +562,24 @@ function HitList:ExportCurrentGuild()
                 val = val or InferRaceIdFromRaceName(target.race) or ""
             elseif key == "sex" then
                 val = NormalizeSexForStorage(val)
+            elseif key == "lastSeenZone" then
+                val = target.lastKnownLocation and target.lastKnownLocation.zone or ""
+            elseif key == "lastSeenSubzone" then
+                val = target.lastKnownLocation and target.lastKnownLocation.subzone or ""
+            elseif key == "lastSeenMapId" then
+                val = target.lastKnownLocation and target.lastKnownLocation.mapId or ""
+            elseif key == "lastSeenX" then
+                val = target.lastKnownLocation and target.lastKnownLocation.x or ""
+            elseif key == "lastSeenY" then
+                val = target.lastKnownLocation and target.lastKnownLocation.y or ""
+            elseif key == "lastSeenAt" then
+                val = target.lastKnownLocation and target.lastKnownLocation.seenAt or ""
+            elseif key == "lastSeenSource" then
+                val = target.lastKnownLocation and target.lastKnownLocation.source or ""
+            elseif key == "lastSeenApproximate" then
+                val = (target.lastKnownLocation and target.lastKnownLocation.approximate) and "1" or "0"
+            elseif key == "lastSeenConfidenceYards" then
+                val = target.lastKnownLocation and target.lastKnownLocation.confidenceYards or ""
             end
             table.insert(fields, tostring(val or ""))
         end

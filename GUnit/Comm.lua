@@ -68,6 +68,15 @@ function Comm:BroadcastUpsert(target)
         raceId = target.raceId or "",
         sex = target.sex or "",
         faction = target.faction or "",
+        lastSeenMapId = target.lastKnownLocation and target.lastKnownLocation.mapId or "",
+        lastSeenZone = target.lastKnownLocation and target.lastKnownLocation.zone or "",
+        lastSeenSubzone = target.lastKnownLocation and target.lastKnownLocation.subzone or "",
+        lastSeenX = target.lastKnownLocation and target.lastKnownLocation.x or "",
+        lastSeenY = target.lastKnownLocation and target.lastKnownLocation.y or "",
+        lastSeenApproximate = (target.lastKnownLocation and target.lastKnownLocation.approximate) and "1" or "0",
+        lastSeenConfidenceYards = target.lastKnownLocation and target.lastKnownLocation.confidenceYards or "",
+        lastSeenAt = target.lastKnownLocation and target.lastKnownLocation.seenAt or "",
+        lastSeenSource = target.lastKnownLocation and target.lastKnownLocation.source or "",
         createdAt = target.createdAt or Utils.Now(),
         updatedAt = target.updatedAt or Utils.Now(),
         killCount = target.killCount or 0,
@@ -84,12 +93,41 @@ function Comm:BroadcastDelete(targetName)
     self:Send("GUILD", payload)
 end
 
-function Comm:BroadcastKill(targetName, killerName, zoneName, ts)
+function Comm:BroadcastKill(targetName, killerName, location, ts)
     if not Utils.InGuild() then return end
+    local zoneName = nil
+    local mapId = ""
+    local subzone = ""
+    local x = ""
+    local y = ""
+    local approximate = "0"
+    local confidenceYards = ""
+    local source = ""
+
+    if type(location) == "table" then
+        zoneName = location.zone
+        mapId = location.mapId or ""
+        subzone = location.subzone or ""
+        x = location.x or ""
+        y = location.y or ""
+        approximate = location.approximate and "1" or "0"
+        confidenceYards = location.confidenceYards or ""
+        source = location.source or ""
+    else
+        zoneName = location
+    end
+
     local payload = self:ActionPayload("KILL", {
         name = targetName,
         killer = killerName,
         zone = zoneName or Utils.ZoneName(),
+        mapId = mapId,
+        subzone = subzone,
+        x = x,
+        y = y,
+        approximate = approximate,
+        confidenceYards = confidenceYards,
+        source = source,
         ts = ts or Utils.Now(),
     })
     self:Send("GUILD", payload)
@@ -109,7 +147,17 @@ end
 
 local function HandleKill(data)
     if not data.name then return end
-    local target = HitList:ApplyKill(data.name, data.killer, data.zone, tonumber(data.ts))
+    local target = HitList:ApplyKill(data.name, data.killer, {
+        mapId = data.mapId,
+        zone = data.zone,
+        subzone = data.subzone,
+        x = data.x,
+        y = data.y,
+        approximate = data.approximate,
+        confidenceYards = data.confidenceYards,
+        seenAt = tonumber(data.ts),
+        source = data.source or "party_kill",
+    }, tonumber(data.ts))
     if target then
         GUnit:NotifyDataChanged()
     end

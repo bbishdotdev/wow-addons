@@ -1,6 +1,6 @@
 local ADDON_NAME, GUnit = ...
 
-GUnit.VERSION = "0.1.0"
+GUnit.VERSION = "0.2.0"
 GUnit.PRINT_PREFIX = "|cffff5555[G-Unit]|r "
 
 local DB_DEFAULTS = {
@@ -114,6 +114,9 @@ local function OnPlayerLogin()
     end
     if GUnit.Tracking and GUnit.Tracking.Init then
         GUnit.Tracking:Init()
+    end
+    if GUnit.Tooltip and GUnit.Tooltip.Init then
+        GUnit.Tooltip:Init()
     end
     if GUnit.UI and GUnit.UI.Init then
         GUnit.UI:Init()

@@ -173,6 +173,45 @@ local function GetDisplayFaction(target)
     return GetEnemyFaction()
 end
 
+local function BuildLocationDisplayParts(location)
+    if type(location) ~= "table" then
+        return nil, nil, true, false
+    end
+
+    local zone = location.zone
+    local subzone = location.subzone
+    if not zone or zone == "" then
+        return nil, nil, true, false
+    end
+
+    local areaText = zone
+    if subzone and subzone ~= "" and subzone ~= zone then
+        areaText = subzone .. ", " .. zone
+    end
+
+    local x = tonumber(location.x)
+    local y = tonumber(location.y)
+    local coordsText = nil
+    if x and y then
+        coordsText = string.format("(%.1f, %.1f)", x * 100, y * 100)
+    end
+
+    return areaText, coordsText, false, location.approximate == true
+end
+
+local function BuildLastSeenListText(target)
+    local areaText, coordsText, unknown, approximate = BuildLocationDisplayParts(target and target.lastKnownLocation)
+    if unknown then
+        return "Last seen location is unknown."
+    end
+
+    local prefix = approximate and "Approx. last seen at " or "Last seen at "
+    if coordsText then
+        return prefix .. areaText .. " " .. coordsText
+    end
+    return prefix .. areaText
+end
+
 local function SetRaceTexture(texture, target)
     local raceName = target and target.race or nil
     local raceId = target and target.raceId or nil
@@ -513,7 +552,7 @@ local function PopulateListRow(row, target)
     row.factionIcon:Hide()
 
     row.nameText:SetText(Utils.ClassColorName(target.name or "Unknown", target.classToken))
-    row.subText:SetText(target.reason ~= "" and target.reason or "No reason provided")
+    row.subText:SetText(BuildLastSeenListText(target))
     row.submitterText:SetText(target.submitter or "-")
 
     local status = target.hitStatus or "active"
@@ -598,6 +637,10 @@ function UI:RefreshDetails()
     if not target then
         self.detailEditMode = false
         self.detailNameText:SetText("No target selected")
+        self.detailMetaText:SetText("")
+        self.detailLocationLabel:SetText("Last Seen")
+        self.detailLocationText:SetText("Location unknown")
+        self.detailLocationCoords:SetText("")
         self.detailModesValue:SetText("Select a target from the list.")
         self.detailBountyStatusValue:SetText("")
         self.detailBountyOwedLabel:Hide()
@@ -644,6 +687,17 @@ function UI:RefreshDetails()
     self.detailFactionIcon:SetTexture(Theme.GetFactionIcon(GetDisplayFaction(target)))
     self.detailNameText:SetText(Utils.ClassColorName(target.name or "Unknown", target.classToken))
     self.detailMetaText:SetText("Requested by " .. (target.submitter or "Unknown"))
+    local areaText, coordsText, unknown, approximate = BuildLocationDisplayParts(target.lastKnownLocation)
+    if unknown then
+        self.detailLocationText:SetText("Location unknown")
+        self.detailLocationText:SetTextColor(unpack(Theme.COLOR.textMuted))
+        self.detailLocationCoords:SetText("")
+    else
+        self.detailLocationText:SetText((approximate and "Approx. " or "") .. areaText)
+        self.detailLocationText:SetTextColor(0.9, 0.9, 0.9, 1)
+        self.detailLocationCoords:SetText(coordsText or "")
+        self.detailLocationCoords:SetTextColor(unpack(Theme.COLOR.textMuted))
+    end
 
     self.detailStatusIcon:SetTexture(Theme.GetStatusIcon(target.hitStatus))
     self.detailStatusText:SetText(FormatStatusLabel(target.hitStatus))
@@ -1433,6 +1487,27 @@ function UI:Init()
     self.detailMetaText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
     self.detailMetaText:SetJustifyH("LEFT")
 
+    self.detailLocationIcon = UIComponents.CreateIcon(detailDrawer, 13)
+    self.detailLocationIcon:SetTexture(Theme.ICON.location or Theme.ICON.fallback)
+    self.detailLocationIcon:SetPoint("TOPLEFT", self.detailMetaText, "BOTTOMLEFT", 0, -6)
+
+    self.detailLocationLabel = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
+    self.detailLocationLabel:SetPoint("LEFT", self.detailLocationIcon, "RIGHT", 4, 0)
+    self.detailLocationLabel:SetText("Last Seen")
+    self.detailLocationLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+
+    self.detailLocationText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    self.detailLocationText:SetPoint("TOPLEFT", self.detailLocationLabel, "BOTTOMLEFT", 0, -2)
+    self.detailLocationText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+    self.detailLocationText:SetJustifyH("LEFT")
+    self.detailLocationText:SetText("Location unknown")
+
+    self.detailLocationCoords = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
+    self.detailLocationCoords:SetPoint("TOPLEFT", self.detailLocationText, "BOTTOMLEFT", 0, -1)
+    self.detailLocationCoords:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+    self.detailLocationCoords:SetJustifyH("LEFT")
+    self.detailLocationCoords:SetText("")
+
     local statStrip = CreateFrame("Frame", nil, detailDrawer)
     statStrip:SetPoint("TOPLEFT", self.detailMetaText, "BOTTOMLEFT", 0, -8)
     statStrip:SetPoint("TOPRIGHT", detailDrawer, "TOPRIGHT", -10, -68)
@@ -1455,8 +1530,20 @@ function UI:Init()
     self.detailKillsText = statStrip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     self.detailKillsText:SetPoint("LEFT", self.detailKillIcon, "RIGHT", 4, 0)
 
+    -- Keep location below the status strip (Requested by -> stats -> Last Seen).
+    self.detailLocationIcon:ClearAllPoints()
+    self.detailLocationIcon:SetPoint("TOPLEFT", statStrip, "BOTTOMLEFT", 0, -8)
+    self.detailLocationLabel:ClearAllPoints()
+    self.detailLocationLabel:SetPoint("LEFT", self.detailLocationIcon, "RIGHT", 4, 0)
+    self.detailLocationText:ClearAllPoints()
+    self.detailLocationText:SetPoint("TOPLEFT", self.detailLocationLabel, "BOTTOMLEFT", 0, -2)
+    self.detailLocationText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+    self.detailLocationCoords:ClearAllPoints()
+    self.detailLocationCoords:SetPoint("TOPLEFT", self.detailLocationText, "BOTTOMLEFT", 0, -1)
+    self.detailLocationCoords:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
+
     self.detailSummaryPanel = CreateFrame("Frame", nil, detailDrawer)
-    self.detailSummaryPanel:SetPoint("TOPLEFT", statStrip, "BOTTOMLEFT", 0, -12)
+    self.detailSummaryPanel:SetPoint("TOPLEFT", self.detailLocationCoords, "BOTTOMLEFT", 0, -10)
     self.detailSummaryPanel:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
     self.detailSummaryPanel:SetHeight(30)
 

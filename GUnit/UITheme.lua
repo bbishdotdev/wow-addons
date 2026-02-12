@@ -32,6 +32,7 @@ Theme.ICON = {
     fallback = "Interface\\Icons\\INV_Misc_QuestionMark",
     bounty = "Interface\\Icons\\INV_Misc_Coin_01",
     kill = "Interface\\Icons\\Ability_FiegnDead",
+    location = "Interface\\Icons\\INV_Misc_Map_01",
     submitter = "Interface\\Icons\\INV_Misc_Note_01",
     statusActive = "Interface\\Icons\\Ability_DualWield",
     statusDone = "Interface\\Icons\\Spell_Holy_SealOfSacrifice",
