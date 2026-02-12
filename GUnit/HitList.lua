@@ -15,6 +15,40 @@ local BOUNTY_MODE_INFINITE = "infinite"
 local BOUNTY_STATUS_OPEN = "open"
 local BOUNTY_STATUS_CLAIMED = "claimed"
 
+local RACE_NAME_TO_ID = {
+    Human = 1,
+    Orc = 2,
+    Dwarf = 3,
+    NightElf = 4,
+    Undead = 5,
+    Tauren = 6,
+    Gnome = 7,
+    Troll = 8,
+    BloodElf = 10,
+    Draenei = 11,
+}
+
+local function NormalizeRaceNameForId(raceName)
+    if not raceName or raceName == "" then
+        return nil
+    end
+    local compact = tostring(raceName):gsub("%s+", "")
+    return compact
+end
+
+local function InferRaceIdFromRaceName(raceName)
+    local key = NormalizeRaceNameForId(raceName)
+    return key and RACE_NAME_TO_ID[key] or nil
+end
+
+local function NormalizeSexForStorage(sexValue)
+    local n = tonumber(sexValue)
+    if n == nil then
+        return 0 -- default male when unknown
+    end
+    return n
+end
+
 local function SafePlayerLocationForUnit(unit)
     if not PlayerLocation or not PlayerLocation.CreateFromUnit then
         return nil
@@ -275,8 +309,8 @@ function HitList:UpsertFromComm(payload)
     target.classToken = payload.classToken or target.classToken
     target.race = payload.race or target.race
     target.faction = payload.faction or target.faction
-    target.raceId = tonumber(payload.raceId) or target.raceId
-    target.sex = tonumber(payload.sex) or target.sex
+    target.raceId = tonumber(payload.raceId) or target.raceId or InferRaceIdFromRaceName(target.race)
+    target.sex = tonumber(payload.sex) or target.sex or 0
     target.createdAt = tonumber(payload.createdAt) or target.createdAt
     target.updatedAt = ts
     target.killCount = tonumber(payload.killCount) or target.killCount or 0
@@ -419,6 +453,10 @@ function HitList:ExportCurrentGuild()
             local val = target[key]
             if key == "validated" then
                 val = val and "1" or "0"
+            elseif key == "raceId" then
+                val = val or InferRaceIdFromRaceName(target.race) or ""
+            elseif key == "sex" then
+                val = NormalizeSexForStorage(val)
             end
             table.insert(fields, tostring(val or ""))
         end
