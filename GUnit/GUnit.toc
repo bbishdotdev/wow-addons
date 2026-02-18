@@ -2,8 +2,9 @@
 ## Title: G-Unit
 ## Notes: Guild-shared PvP hit list tracker for TBC Classic
 ## Author: btbis
-## Version: 0.2.0
+## Version: 0.3.0
 ## License: GNU General Public License v3.0
+## IconTexture: Interface\AddOns\GUnit\logo
 ## SavedVariables: GUnitDB
 
 Utils.lua

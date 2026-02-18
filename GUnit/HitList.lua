@@ -200,13 +200,19 @@ end
 
 function HitList:SortedNamesForCurrentGuild()
     local guildName = Utils.GuildName()
+    local targets = GUnit.db.targets
     local names = {}
-    for name, target in pairs(GUnit.db.targets) do
+    for name, target in pairs(targets) do
         if target.guildName == guildName then
             table.insert(names, name)
         end
     end
-    table.sort(names)
+    table.sort(names, function(a, b)
+        local ta = targets[a] and targets[a].createdAt or 0
+        local tb = targets[b] and targets[b].createdAt or 0
+        if ta == tb then return a < b end
+        return ta > tb
+    end)
     return names
 end
 
