@@ -1,8 +1,5 @@
 local _, Addon = ...
 
--- TODO(shared-ui): This file intentionally mirrors PvPStats/UITheme.lua.
--- Keep APIs in sync across addons until we promote these modules into one shared package.
-
 local Theme = {}
 Addon.UITheme = Theme
 
@@ -169,7 +166,7 @@ function Theme.GetRaceIcon(raceName)
     return Theme.ICON.race[compact] or Theme.ICON.fallback
 end
 
-function Theme.SetRaceIcon(texture, raceName, raceId, _sex, debugSeed)
+function Theme.SetRaceIcon(texture, raceName, raceId, _sex)
     if not texture then
         return
     end

@@ -184,44 +184,6 @@ local function OpenUI()
     end
 end
 
-local function DebugRaceForTarget()
-    if not UnitExists("target") or not UnitIsPlayer("target") then
-        GUnit:Print("Target an enemy player first.")
-        return
-    end
-    local targetName = UnitName("target") or "Unknown"
-    local raceName = UnitRace("target") or "?"
-    local location = nil
-    if PlayerLocation and PlayerLocation.CreateFromUnit then
-        local ok, value = pcall(PlayerLocation.CreateFromUnit, PlayerLocation, "target")
-        if ok then
-            location = value
-        end
-    end
-    local raceId = (location and C_PlayerInfo and C_PlayerInfo.GetRace) and C_PlayerInfo.GetRace(location) or nil
-    local sex = (location and C_PlayerInfo and C_PlayerInfo.GetSex) and C_PlayerInfo.GetSex(location) or nil
-
-    GUnit:Print("Race debug for " .. targetName .. ": race=" .. tostring(raceName) .. ", raceId=" .. tostring(raceId) .. ", sex=" .. tostring(sex))
-    local raceCoords = _G and _G.RACE_ICON_TCOORDS or nil
-    if raceCoords then
-        local compact = tostring(raceName):gsub("%s+", "")
-        local byName = raceCoords[raceName] or raceCoords[compact] or raceCoords[string.upper(compact)] or raceCoords[string.lower(compact)]
-        local byId = raceId and (raceCoords[raceId] or raceCoords[tostring(raceId)]) or nil
-        local hit = byName or byId
-        if hit then
-            local left = hit[1] or hit.left
-            local right = hit[2] or hit.right
-            local top = hit[3] or hit.top
-            local bottom = hit[4] or hit.bottom
-            GUnit:Print("RACE_ICON_TCOORDS hit: " .. tostring(left) .. "," .. tostring(right) .. "," .. tostring(top) .. "," .. tostring(bottom))
-        else
-            GUnit:Print("RACE_ICON_TCOORDS has no key for this target race.")
-        end
-    else
-        GUnit:Print("RACE_ICON_TCOORDS not available on this client.")
-    end
-end
-
 local function HandleGhitCommand(msg)
     local input = strtrim(msg or "")
     if input == "" then
@@ -327,10 +289,6 @@ SlashCmdList["GUNIT"] = function(msg)
             GUnit.Sync:RequestSync()
             GUnit:Print("Sync requested.")
         end
-        return
-    end
-    if input == "debug-race" then
-        DebugRaceForTarget()
         return
     end
     -- Forward all other commands to the hit list handler

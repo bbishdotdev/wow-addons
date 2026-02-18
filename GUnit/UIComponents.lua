@@ -1,9 +1,6 @@
 local _, Addon = ...
 local Theme = Addon.UITheme
 
--- TODO(shared-ui): This file intentionally mirrors PvPStats/UIComponents.lua.
--- Keep APIs in sync across addons until we promote these modules into one shared package.
-
 local UIComponents = {}
 Addon.UIComponents = UIComponents
 

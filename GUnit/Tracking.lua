@@ -215,16 +215,8 @@ local function OnCombatLogEvent()
 
     local targetName = Utils.NormalizeName(destName)
     local target = HitList:Get(targetName)
-    if not target then
-        GUnit:Print("[DEBUG] PARTY_KILL: " .. tostring(destName) .. " not on hit list")
-        return
-    end
-    if not HitList:ShouldAnnounceSighting(target) then
-        GUnit:Print("[DEBUG] PARTY_KILL: " .. targetName .. " skipped (status=" .. tostring(target.hitStatus) .. ")")
-        return
-    end
-
-    GUnit:Print("[DEBUG] PARTY_KILL: processing kill on " .. targetName .. " (pre-killCount=" .. tostring(target.killCount) .. ")")
+    if not target then return end
+    if not HitList:ShouldAnnounceSighting(target) then return end
 
     local now = Utils.Now()
     local killLocation = Utils.BuildLocationPayload({
@@ -239,7 +231,6 @@ local function OnCombatLogEvent()
     Comm:BroadcastKill(targetName, playerName, killLocation, now)
 
     local updatedTarget = HitList:Get(targetName)
-    GUnit:Print("[DEBUG] PARTY_KILL: post-kill " .. targetName .. " killCount=" .. tostring(updatedTarget and updatedTarget.killCount or "NIL"))
     Comm:BroadcastUpsert(updatedTarget)
     GUnit:NotifyDataChanged()
 

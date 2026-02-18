@@ -11,6 +11,7 @@ local UI = GUnit.UI
 local rows = {}
 local filteredNames = {}
 local SELECTED_ROW_BG = { 1, 0.82, 0.0, 0.2 }
+local MAX_KILL_DETAIL_ROWS = 6
 
 local mainFrame, contentArea
 local guildInfoRow
@@ -212,13 +213,86 @@ local function BuildLastSeenListText(target)
     return prefix .. areaText
 end
 
+local function FormatKillTimestamp(ts)
+    local value = tonumber(ts)
+    if not value or value <= 0 then
+        return "-"
+    end
+    local ok, formatted = pcall(date, "%Y-%m-%d %H:%M", value)
+    if ok and formatted and formatted ~= "" then
+        return formatted
+    end
+    return tostring(value)
+end
+
+local function BuildKillDetailsByKiller(target)
+    if not target then
+        return {}
+    end
+
+    local groups = {}
+    local order = {}
+    local claims = target.bountyClaims or {}
+    local submitter = Utils.NormalizeName(target.submitter)
+
+    for _, kill in ipairs(target.kills or {}) do
+        local killer = Utils.NormalizeName(kill.killer) or kill.killer or "Unknown"
+        if not groups[killer] then
+            groups[killer] = {
+                killer = killer,
+                killCount = 0,
+                lastKillTs = tonumber(kill.ts) or 0,
+            }
+            table.insert(order, killer)
+        end
+        local entry = groups[killer]
+        entry.killCount = entry.killCount + 1
+        local killTs = tonumber(kill.ts) or 0
+        if killTs > (entry.lastKillTs or 0) then
+            entry.lastKillTs = killTs
+        end
+    end
+
+    local rowsOut = {}
+    for _, killer in ipairs(order) do
+        local entry = groups[killer]
+        local claim = claims[killer]
+        local totalCopper = claim and tonumber(claim.totalCopper) or 0
+        local paidCopper = claim and tonumber(claim.paidCopper) or 0
+        local ineligible = submitter and killer == submitter
+        local claimed = (not ineligible) and totalCopper > 0
+        local paid = claimed and paidCopper >= totalCopper
+
+        table.insert(rowsOut, {
+            killer = entry.killer,
+            lastKillTs = entry.lastKillTs or 0,
+            lastKillText = FormatKillTimestamp(entry.lastKillTs),
+            killCount = entry.killCount or 0,
+            ineligible = ineligible == true,
+            claimed = claimed == true,
+            paid = paid == true,
+        })
+    end
+
+    table.sort(rowsOut, function(a, b)
+        if (a.lastKillTs or 0) == (b.lastKillTs or 0) then
+            if (a.killCount or 0) == (b.killCount or 0) then
+                return (a.killer or "") < (b.killer or "")
+            end
+            return (a.killCount or 0) > (b.killCount or 0)
+        end
+        return (a.lastKillTs or 0) > (b.lastKillTs or 0)
+    end)
+
+    return rowsOut
+end
+
 local function SetRaceTexture(texture, target)
     local raceName = target and target.race or nil
     local raceId = target and target.raceId or nil
     local sex = target and target.sex or nil
-    local debugSeed = target and target.name or nil
     if Theme.SetRaceIcon then
-        Theme.SetRaceIcon(texture, raceName, raceId, sex, debugSeed)
+        Theme.SetRaceIcon(texture, raceName, raceId, sex)
         return
     end
     texture:SetTexture(Theme.GetRaceIcon(raceName))
@@ -641,6 +715,13 @@ function UI:RefreshDetails()
         self.detailLocationLabel:SetText("Last Seen")
         self.detailLocationText:SetText("Location unknown")
         self.detailLocationCoords:SetText("")
+        self.killDetailsSectionLabel:Hide()
+        self.killDetailsHeader:Hide()
+        self.killDetailsEmptyText:Hide()
+        self.killDetailsMoreText:Hide()
+        for _, row in ipairs(self.killDetailsRows or {}) do
+            row:Hide()
+        end
         self.detailModesValue:SetText("Select a target from the list.")
         self.detailBountyStatusValue:SetText("")
         self.detailBountyOwedLabel:Hide()
@@ -739,7 +820,8 @@ function UI:RefreshDetails()
         self.detailEditButton:Hide()
     end
 
-    self.reasonReadOnlyText:SetText((target.reason and target.reason ~= "") and target.reason or "No reason provided.")
+    local reasonValue = (target.reason and target.reason ~= "") and target.reason or "No reason provided."
+    self.reasonReadOnlyText:SetText(reasonValue)
 
     if editMode then
         self.detailSummaryPanel:Show()
@@ -785,7 +867,7 @@ function UI:RefreshDetails()
         self.reasonScroll:SetPoint("TOPLEFT", self.reasonLabel, "BOTTOMLEFT", 0, -6)
     else
         self.detailSummaryPanel:Show()
-        self.reasonReadOnlyLabel:Show()
+        self.reasonReadOnlyLabel:Hide()
         self.detailModesLabel:Show()
         self.detailModesValue:Show()
         self.detailBountyStatusLabel:Show()
@@ -804,6 +886,14 @@ function UI:RefreshDetails()
         self.reasonEdit:Hide()
         self.reasonLabel:Hide()
 
+        -- Restore original anchors for reasonLabel/reasonScroll so the chain
+        -- hitModeLabel → reasonScroll → reasonLabel doesn't cycle back through
+        -- bountyLabel → hitModeDropdown → hitModeLabel (edit-mode leftovers).
+        self.reasonLabel:ClearAllPoints()
+        self.reasonLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "BOTTOMLEFT", 0, -2)
+        self.reasonScroll:ClearAllPoints()
+        self.reasonScroll:SetPoint("TOPLEFT", self.reasonLabel, "BOTTOMLEFT", 0, -6)
+
         -- Restore readonly anchors.
         self.hitModeLabel:ClearAllPoints()
         self.hitModeLabel:SetPoint("TOPLEFT", self.reasonScroll, "BOTTOMLEFT", 2, -12)
@@ -820,17 +910,87 @@ function UI:RefreshDetails()
         self.bountyModeDropdown:ClearAllPoints()
         self.bountyModeDropdown:SetPoint("TOPLEFT", self.bountyEdit, "BOTTOMLEFT", -20, -10)
 
-        self.reasonReadOnlyLabel:ClearAllPoints()
-        self.reasonReadOnlyLabel:SetPoint("TOPLEFT", self.detailSummaryPanel, "BOTTOMLEFT", 0, -2)
-
         -- Ensure readonly reason section is always restored after Save.
-        self.reasonReadOnlyLabel:Show()
-        self.reasonReadOnlyLabel:SetAlpha(1)
         self.reasonReadOnlyText:Show()
         self.reasonReadOnlyText:SetAlpha(1)
         self.reasonReadOnlyText:ClearAllPoints()
-        self.reasonReadOnlyText:SetPoint("TOPLEFT", self.reasonReadOnlyLabel, "BOTTOMLEFT", 0, -6)
+        self.reasonReadOnlyText:SetPoint("TOPLEFT", self.detailSummaryPanel, "BOTTOMLEFT", 0, -2)
         self.reasonReadOnlyText:SetPoint("RIGHT", detailDrawer, "RIGHT", -24, 0)
+        self.reasonReadOnlyText:SetText("|cFFFFD100Reason|r  " .. reasonValue)
+    end
+
+    -- Kill details visible in both modes; anchor depends on layout.
+    self.killDetailsSectionLabel:Show()
+    self.killDetailsSectionLabel:SetAlpha(1)
+    self.killDetailsSectionLabel:ClearAllPoints()
+    if editMode then
+        self.killDetailsSectionLabel:SetPoint("TOPLEFT", self.reasonScroll, "BOTTOMLEFT", 0, -14)
+    else
+        self.killDetailsSectionLabel:SetPoint("TOPLEFT", self.reasonReadOnlyText, "BOTTOMLEFT", 0, -14)
+    end
+
+    self.killDetailsHeader:ClearAllPoints()
+    self.killDetailsHeader:SetPoint("TOPLEFT", self.killDetailsSectionLabel, "BOTTOMLEFT", 0, -6)
+    self.killDetailsHeader:Show()
+    self.killDetailsHeader:SetAlpha(1)
+
+    local canTogglePaid = editMode and isSubmitter
+    local groupedKills = BuildKillDetailsByKiller(target)
+    local shownCount = math.min(#groupedKills, MAX_KILL_DETAIL_ROWS)
+
+    if #groupedKills == 0 then
+        self.killDetailsEmptyText:ClearAllPoints()
+        self.killDetailsEmptyText:SetPoint("TOPLEFT", self.killDetailsHeader, "BOTTOMLEFT", 0, -6)
+        self.killDetailsEmptyText:SetText("No kills recorded for this target yet.")
+        self.killDetailsEmptyText:Show()
+        self.killDetailsMoreText:Hide()
+        for _, row in ipairs(self.killDetailsRows) do
+            row:Hide()
+        end
+    else
+        self.killDetailsEmptyText:Hide()
+        local lastAnchor = self.killDetailsHeader
+        for i, row in ipairs(self.killDetailsRows) do
+            if i <= shownCount then
+                local item = groupedKills[i]
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", lastAnchor, "BOTTOMLEFT", 0, -2)
+                row:SetPoint("RIGHT", self.killDetailsHeader, "RIGHT", 0, 0)
+                row.killerText:SetText(item.killer or "-")
+                row.whenText:SetText(item.lastKillText or "-")
+                row.killsText:SetText(tostring(item.killCount or 0))
+
+                row._killerName = item.killer
+
+                local claimedIcon = item.ineligible and "✗" or (item.claimed and "✓" or "✗")
+                local paidIcon = item.ineligible and "✗" or (item.claimed and (item.paid and "✓" or "✗") or "✗")
+                row.claimedText:SetText(claimedIcon)
+
+                if canTogglePaid and item.claimed and not item.ineligible then
+                    row.paidText:Hide()
+                    row.paidButton.label:SetText(paidIcon)
+                    row.paidButton:Show()
+                else
+                    row.paidButton:Hide()
+                    row.paidText:SetText(paidIcon)
+                    row.paidText:Show()
+                end
+
+                row:Show()
+                lastAnchor = row
+            else
+                row:Hide()
+            end
+        end
+
+        if #groupedKills > shownCount then
+            self.killDetailsMoreText:ClearAllPoints()
+            self.killDetailsMoreText:SetPoint("TOPLEFT", self.killDetailsRows[shownCount], "BOTTOMLEFT", 0, -4)
+            self.killDetailsMoreText:SetText("+" .. tostring(#groupedKills - shownCount) .. " more killers...")
+            self.killDetailsMoreText:Show()
+        else
+            self.killDetailsMoreText:Hide()
+        end
     end
 
     local isActive = target.hitStatus == "active"
@@ -1480,6 +1640,15 @@ function UI:Init()
             UI.detailEditMode = true
         end
         UI:RefreshDetails()
+        if leavingEditMode and C_Timer and C_Timer.After then
+            -- Save triggers intermediate refreshes while transitioning modes.
+            -- Run one deferred readonly refresh to stabilize anchors/visibility.
+            C_Timer.After(0, function()
+                if UI and UI.detailEditMode == false and UI.selectedName then
+                    UI:RefreshDetails()
+                end
+            end)
+        end
     end)
 
     self.detailMetaText = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
@@ -1497,7 +1666,7 @@ function UI:Init()
     self.detailLocationLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
 
     self.detailLocationText = detailDrawer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    self.detailLocationText:SetPoint("TOPLEFT", self.detailLocationLabel, "BOTTOMLEFT", 0, -2)
+    self.detailLocationText:SetPoint("LEFT", self.detailLocationLabel, "RIGHT", 8, 0)
     self.detailLocationText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
     self.detailLocationText:SetJustifyH("LEFT")
     self.detailLocationText:SetText("Location unknown")
@@ -1536,14 +1705,14 @@ function UI:Init()
     self.detailLocationLabel:ClearAllPoints()
     self.detailLocationLabel:SetPoint("LEFT", self.detailLocationIcon, "RIGHT", 4, 0)
     self.detailLocationText:ClearAllPoints()
-    self.detailLocationText:SetPoint("TOPLEFT", self.detailLocationLabel, "BOTTOMLEFT", 0, -2)
+    self.detailLocationText:SetPoint("LEFT", self.detailLocationLabel, "RIGHT", 8, 0)
     self.detailLocationText:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
     self.detailLocationCoords:ClearAllPoints()
     self.detailLocationCoords:SetPoint("TOPLEFT", self.detailLocationText, "BOTTOMLEFT", 0, -1)
     self.detailLocationCoords:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
 
     self.detailSummaryPanel = CreateFrame("Frame", nil, detailDrawer)
-    self.detailSummaryPanel:SetPoint("TOPLEFT", self.detailLocationCoords, "BOTTOMLEFT", 0, -10)
+    self.detailSummaryPanel:SetPoint("TOPLEFT", statStrip, "BOTTOMLEFT", 0, -42)
     self.detailSummaryPanel:SetPoint("RIGHT", detailDrawer, "RIGHT", -10, 0)
     self.detailSummaryPanel:SetHeight(30)
 
@@ -1628,6 +1797,118 @@ function UI:Init()
     self.reasonReadOnlyText:SetJustifyV("TOP")
     self.reasonReadOnlyText:SetTextColor(0.9, 0.9, 0.9, 1)
     self.reasonReadOnlyText:Hide()
+
+    self.killDetailsSectionLabel = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
+    self.killDetailsSectionLabel:SetText("Kill Details")
+    self.killDetailsSectionLabel:SetTextColor(unpack(Theme.COLOR.textAccent))
+    self.killDetailsSectionLabel:Hide()
+
+    self.killDetailsHeader = CreateFrame("Frame", nil, detailDrawer)
+    self.killDetailsHeader:SetSize(300, 14)
+    self.killDetailsHeader:Hide()
+
+    self.killDetailsHeader.killer = UIComponents.CreateMutedText(self.killDetailsHeader, "GameFontNormalSmall")
+    self.killDetailsHeader.killer:SetPoint("LEFT", self.killDetailsHeader, "LEFT", 0, 0)
+    self.killDetailsHeader.killer:SetWidth(76)
+    self.killDetailsHeader.killer:SetJustifyH("LEFT")
+    self.killDetailsHeader.killer:SetText("Killer")
+
+    self.killDetailsHeader.when = UIComponents.CreateMutedText(self.killDetailsHeader, "GameFontNormalSmall")
+    self.killDetailsHeader.when:SetPoint("LEFT", self.killDetailsHeader.killer, "RIGHT", 4, 0)
+    self.killDetailsHeader.when:SetWidth(104)
+    self.killDetailsHeader.when:SetJustifyH("LEFT")
+    self.killDetailsHeader.when:SetText("Last Kill")
+
+    self.killDetailsHeader.kills = UIComponents.CreateMutedText(self.killDetailsHeader, "GameFontNormalSmall")
+    self.killDetailsHeader.kills:SetPoint("LEFT", self.killDetailsHeader.when, "RIGHT", 4, 0)
+    self.killDetailsHeader.kills:SetWidth(30)
+    self.killDetailsHeader.kills:SetJustifyH("LEFT")
+    self.killDetailsHeader.kills:SetText("Kills")
+
+    self.killDetailsHeader.claimed = UIComponents.CreateMutedText(self.killDetailsHeader, "GameFontNormalSmall")
+    self.killDetailsHeader.claimed:SetPoint("LEFT", self.killDetailsHeader.kills, "RIGHT", 4, 0)
+    self.killDetailsHeader.claimed:SetWidth(52)
+    self.killDetailsHeader.claimed:SetJustifyH("LEFT")
+    self.killDetailsHeader.claimed:SetText("Claimed")
+
+    self.killDetailsHeader.paid = UIComponents.CreateMutedText(self.killDetailsHeader, "GameFontNormalSmall")
+    self.killDetailsHeader.paid:SetPoint("LEFT", self.killDetailsHeader.claimed, "RIGHT", 4, 0)
+    self.killDetailsHeader.paid:SetWidth(30)
+    self.killDetailsHeader.paid:SetJustifyH("LEFT")
+    self.killDetailsHeader.paid:SetText("Paid")
+
+    self.killDetailsRows = {}
+    for i = 1, MAX_KILL_DETAIL_ROWS do
+        local row = CreateFrame("Frame", nil, detailDrawer)
+        row:SetHeight(14)
+        row:Hide()
+
+        row.killerText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.killerText:SetPoint("LEFT", row, "LEFT", 0, 0)
+        row.killerText:SetWidth(76)
+        row.killerText:SetJustifyH("LEFT")
+
+        row.whenText = UIComponents.CreateMutedText(row, "GameFontNormalSmall")
+        row.whenText:SetPoint("LEFT", row.killerText, "RIGHT", 4, 0)
+        row.whenText:SetWidth(104)
+        row.whenText:SetJustifyH("LEFT")
+
+        row.killsText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.killsText:SetPoint("LEFT", row.whenText, "RIGHT", 4, 0)
+        row.killsText:SetWidth(30)
+        row.killsText:SetJustifyH("LEFT")
+
+        row.claimedText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.claimedText:SetPoint("LEFT", row.killsText, "RIGHT", 4, 0)
+        row.claimedText:SetWidth(52)
+        row.claimedText:SetJustifyH("LEFT")
+
+        row.paidText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.paidText:SetPoint("LEFT", row.claimedText, "RIGHT", 4, 0)
+        row.paidText:SetWidth(30)
+        row.paidText:SetJustifyH("LEFT")
+
+        row.paidButton = CreateFrame("Button", nil, row)
+        row.paidButton:SetSize(30, 14)
+        row.paidButton:SetPoint("LEFT", row.claimedText, "RIGHT", 4, 0)
+        row.paidButton:RegisterForClicks("LeftButtonUp")
+        row.paidButton:Hide()
+
+        row.paidButton.label = row.paidButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        row.paidButton.label:SetPoint("LEFT", row.paidButton, "LEFT", 0, 0)
+        row.paidButton.label:SetWidth(30)
+        row.paidButton.label:SetJustifyH("LEFT")
+
+        row.paidButton:SetScript("OnEnter", function(btn)
+            btn.label:SetTextColor(1, 1, 0, 1)
+        end)
+        row.paidButton:SetScript("OnLeave", function(btn)
+            btn.label:SetTextColor(0.9, 0.9, 0.9, 1)
+        end)
+        row.paidButton:SetScript("OnClick", function()
+            if not row._killerName or not UI.selectedName then return end
+            local target = HitList:Get(UI.selectedName)
+            if not target or not Utils.IsSubmitter(target) then return end
+            local claim = target.bountyClaims and target.bountyClaims[row._killerName]
+            if not claim then return end
+            local isPaid = (claim.paidCopper or 0) >= (claim.totalCopper or 0)
+            local updated = HitList:SetBountyPaid(UI.selectedName, row._killerName, not isPaid)
+            if updated then
+                SaveTargetAndBroadcast(updated)
+            end
+        end)
+
+        self.killDetailsRows[i] = row
+    end
+
+    self.killDetailsEmptyText = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
+    self.killDetailsEmptyText:SetJustifyH("LEFT")
+    self.killDetailsEmptyText:SetText("No kills recorded for this target yet.")
+    self.killDetailsEmptyText:Hide()
+
+    self.killDetailsMoreText = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
+    self.killDetailsMoreText:SetJustifyH("LEFT")
+    self.killDetailsMoreText:Hide()
 
     self.hitModeLabel = UIComponents.CreateMutedText(detailDrawer, "GameFontNormalSmall")
     self.hitModeLabel:SetPoint("TOPLEFT", self.reasonScroll, "BOTTOMLEFT", 2, -12)

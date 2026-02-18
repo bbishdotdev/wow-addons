@@ -1,3 +1,0 @@
-Ganksalot;Feoladair;BRIDGE FØUR;camps blackrock mountain;5000;kos;active;first_kill;open;1;ROGUE;Undead;Horde;1770800000;1770800100;3
-Corpserunner;Feoladair;BRIDGE FØUR;griefed lowbies in redridge;0;one_time;active;none;open;0;;;Horde;1770800200;1770800300;0
-Flagtroller;Someguildie;BRIDGE FØUR;afk in wsg;10000;one_time;active;infinite;open;1;MAGE;Troll;Horde;1770800400;1770800500;1

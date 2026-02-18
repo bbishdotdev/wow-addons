@@ -431,10 +431,7 @@ end
 
 function HitList:ApplyKill(targetName, killerName, location, ts)
     local target = self:Get(targetName)
-    if not target then
-        GUnit:Print("[DEBUG] ApplyKill: target not found for '" .. tostring(targetName) .. "'")
-        return nil
-    end
+    if not target then return nil end
 
     local now = ts or Utils.Now()
     local killer = Utils.NormalizeName(killerName) or killerName or "Unknown"
@@ -468,13 +465,14 @@ function HitList:ApplyKill(targetName, killerName, location, ts)
         },
     })
     target.killCount = prevCount + 1
-    GUnit:Print("[DEBUG] ApplyKill: " .. targetName .. " killCount " .. prevCount .. " -> " .. target.killCount)
 
     if target.hitMode == HIT_MODE_ONE_TIME and target.hitStatus == HIT_STATUS_ACTIVE then
         target.hitStatus = HIT_STATUS_COMPLETED
     end
 
-    if target.bountyAmount and target.bountyAmount > 0 then
+    local submitterName = Utils.NormalizeName(target.submitter)
+    local killerEligibleForClaim = (submitterName == nil) or (Utils.NormalizeName(killer) ~= submitterName)
+    if target.bountyAmount and target.bountyAmount > 0 and killerEligibleForClaim then
         target.bountyClaims = target.bountyClaims or {}
         local existing = target.bountyClaims[killer] or { totalCopper = 0, paidCopper = 0, claimCount = 0, lastClaimAt = 0 }
         existing.paidCopper = existing.paidCopper or 0
@@ -515,6 +513,22 @@ function HitList:RecordBountyPayment(targetName, killerName, copperPaid)
 
     claim.paidCopper = claim.paidCopper or 0
     claim.paidCopper = math.min(claim.totalCopper, claim.paidCopper + copperPaid)
+    target.updatedAt = Utils.Now()
+    return target
+end
+
+function HitList:SetBountyPaid(targetName, killerName, paid)
+    local target = self:Get(targetName)
+    if not target then return nil, "Target not found." end
+
+    local killer = Utils.NormalizeName(killerName)
+    if not killer then return nil, "Invalid killer name." end
+
+    target.bountyClaims = target.bountyClaims or {}
+    local claim = target.bountyClaims[killer]
+    if not claim then return nil, "No bounty claim for " .. killer end
+
+    claim.paidCopper = paid and claim.totalCopper or 0
     target.updatedAt = Utils.Now()
     return target
 end

@@ -3,6 +3,7 @@
 ## Notes: Battleground PvP analytics tracker for TBC Classic
 ## Author: btbis
 ## Version: 0.1.0
+## License: GNU General Public License v3.0
 ## SavedVariablesPerCharacter: PvPStatsDB
 
 Utils.lua

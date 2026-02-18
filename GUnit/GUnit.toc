@@ -3,6 +3,7 @@
 ## Notes: Guild-shared PvP hit list tracker for TBC Classic
 ## Author: btbis
 ## Version: 0.2.0
+## License: GNU General Public License v3.0
 ## SavedVariables: GUnitDB
 
 Utils.lua
